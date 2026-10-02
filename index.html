@@ -10,7 +10,7 @@
 <body>
   <header class="top">
     <h1>3쿠션 샷 예측기</h1>
-    <p class="sub">공 배치 → 방향·힘·당점 설정 → 결과 예측</p>
+    <p class="sub">공을 배치하면 득점 샷을 추천합니다 · 탭해서 경로 확인 · 직접 조정</p>
   </header>
   <main class="layout">
     <section class="table-wrap">
@@ -18,6 +18,7 @@
       <div class="table-bar">
         <button id="play" class="primary">▶ 재생</button>
         <button id="lock" class="toggle" aria-pressed="false" title="공 배치를 고정하고 터치는 겨냥에만 사용">🔓 배치</button>
+        <button id="wideBtn" class="toggle wide-btn" aria-pressed="false" title="휴대폰을 옆으로 눕혀 큰 테이블로 보기">⤢ 크게</button>
         <div id="jog" class="jog" title="좌우로 드래그해서 방향 미세 조정"><span id="jogTxt">◀ 미세 조정 ▶</span></div>
       </div>
       <div class="view-opts">
@@ -30,12 +31,26 @@
     </section>
 
     <nav class="tabs" id="tabs">
-      <button data-tab="0">상황</button><button data-tab="1" class="on">샷</button><button data-tab="2">결과</button><button data-tab="3">시스템</button>
+      <button data-tab="0" class="on">★ 추천</button><button data-tab="1">배치</button><button data-tab="2">샷 조정</button><button data-tab="3">시스템</button>
     </nav>
 
     <aside class="panel" id="panel">
+      <details open class="active rec">
+        <summary>★ 추천 샷</summary>
+        <div class="rec-head">
+          <button id="recBtn" class="primary big">이 배치로 추천 받기</button>
+          <div class="seg" id="recMode" title="빠름: 당점 3종 · 정밀: 당점·힘·끌어치기 조합 17종">
+            <button data-v="fast" class="on">빠름</button><button data-v="fine">정밀</button>
+          </div>
+        </div>
+        <label class="chk"><input type="checkbox" id="autoRec" checked /> 배치가 바뀌면 자동으로 추천</label>
+        <div id="recStatus" class="rec-status"></div>
+        <div id="progress" class="progress hidden"><div></div></div>
+        <ol id="cands" class="cards"></ol>
+      </details>
+
       <details open>
-        <summary>① 상황 입력</summary>
+        <summary>① 배치</summary>
         <div class="row">
           <span class="lbl">수구</span>
           <div class="seg" id="cueSel">
@@ -53,8 +68,8 @@
         <p class="note">좌표는 다이아몬드 단위 (왼쪽 아래 코너 = 0,0)</p>
       </details>
 
-      <details open class="active">
-        <summary>② 샷 설정</summary>
+      <details open>
+        <summary>② 샷 직접 조정</summary>
         <div class="row">
           <span class="lbl">방향</span>
           <button class="mini" data-da="-1">−1°</button>
@@ -77,21 +92,12 @@
             <p class="note">공 그림을 터치/드래그.<br />1팁 = 공 반지름의 20%</p>
           </div>
         </div>
-      </details>
-
-      <details open>
-        <summary>③ 예측 결과</summary>
+        <h4 class="sub-h">현재 샷 예측</h4>
         <div id="detail"></div>
-        <div class="row">
-          <button id="search" class="primary">추천 샷 탐색</button>
-          <label class="chk"><input type="checkbox" id="wide" /> 당점·힘도 탐색</label>
-        </div>
-        <div id="progress" class="progress hidden"><div></div></div>
-        <ol id="cands" class="cands"></ol>
       </details>
 
       <details>
-        <summary>④ 다이아몬드 시스템</summary>
+        <summary>③ 다이아몬드 시스템</summary>
         <div class="row"><span class="lbl">1쿠션</span><select id="c1"></select></div>
         <div class="row"><span class="lbl">2쿠션</span><select id="c2"></select></div>
         <div class="row"><span class="lbl">3쿠션</span><select id="c3"></select></div>

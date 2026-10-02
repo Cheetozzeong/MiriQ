@@ -4,7 +4,8 @@ import {
   type BallId, type Layout, type Pos, type Shot, type SimResult, type Wall,
 } from './physics';
 import { calibrate, railPoint, solveSystem, type SystemResult } from './systems';
-import type { Candidate, WorkerRequest, WorkerResponse } from './worker';
+import { findRanges, type ScanRange } from './ranges';
+import type { ShotSummary, WorkerRequest, WorkerResponse } from './worker';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const R = BALL.R;
@@ -22,26 +23,60 @@ let shot: Shot = { cue: 'white', angleDeg: 6, speed: 3.2, tipX: 0.3, tipY: 0.2 }
 let result: SimResult;
 let prob: number | null = null;
 let sysRes: SystemResult | null = null;
+interface Candidate extends ScanRange { tipX: number; tipY: number; speed: number; prob: number; summary?: ShotSummary }
 let candidates: Candidate[] = [];
+let selected = -1; // 현재 적용된 추천 후보
 let anim: { start: number; rate: number } | null = null;
 
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
 
 // ───────── 워커 ─────────
-const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-let reqId = 0, probId = 0, searchId = 0;
-worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
+const newWorker = () => new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+// 현재 샷 성공 확률 전용 워커 (상시)
+const probe = newWorker();
+let reqId = 0, probId = 0;
+probe.onmessage = (ev: MessageEvent<WorkerResponse>) => {
   const m = ev.data;
-  if (m.kind === 'prob' && m.id === probId) { prob = m.value; renderDetail(); }
-  if (m.kind === 'progress' && m.id === searchId) ($('progress').firstElementChild as HTMLElement).style.width = `${m.value * 100}%`;
-  if (m.kind === 'search' && m.id === searchId) { candidates = m.candidates; $('progress').classList.add('hidden'); renderCands(); }
+  if (m.kind === 'eval' && m.id === probId) { prob = m.prob; renderDetail(); }
 };
-const send = (r: WorkerRequest) => worker.postMessage(r);
 let probTimer = 0;
 function requestProb() {
   prob = null;
   clearTimeout(probTimer);
-  probTimer = window.setTimeout(() => { probId = ++reqId; send({ kind: 'prob', id: probId, layout, shot }); }, 200);
+  probTimer = window.setTimeout(() => {
+    probId = ++reqId;
+    probe.postMessage({ kind: 'eval', id: probId, layout, shot, n: 40 } satisfies WorkerRequest);
+  }, 200);
+}
+
+// 작업 여러 개를 코어 수만큼 워커에 나눠 실행. cancel() 시 워커를 종료하고 결과는 버린다
+function runPool<T extends WorkerResponse>(reqs: WorkerRequest[], onProgress: (p: number) => void) {
+  const n = Math.max(1, Math.min(reqs.length, (navigator.hardwareConcurrency || 4) - 1, 8));
+  const workers = Array.from({ length: n }, newWorker);
+  const results: T[] = new Array(reqs.length);
+  const prog = new Array(reqs.length).fill(0);
+  let next = 0, done = 0, cancelled = false;
+  const promise = new Promise<T[]>((resolve) => {
+    if (!reqs.length) { resolve([]); return; }
+    const assign = (w: Worker) => {
+      if (next >= reqs.length) return;
+      const i = next++;
+      w.onmessage = (ev: MessageEvent<WorkerResponse>) => {
+        if (cancelled) return;
+        const m = ev.data;
+        if (m.kind === 'progress') prog[i] = m.value;
+        else {
+          results[i] = m as T; prog[i] = 1; done++;
+          if (done === reqs.length) { workers.forEach((x) => x.terminate()); resolve(results); }
+          else assign(w);
+        }
+        onProgress(prog.reduce((a, b) => a + b, 0) / reqs.length);
+      };
+      w.postMessage({ ...reqs[i], id: i });
+    };
+    workers.forEach(assign);
+  });
+  return { promise, cancel: () => { cancelled = true; workers.forEach((w) => w.terminate()); } };
 }
 
 // ───────── 예측 ─────────
@@ -57,6 +92,7 @@ function recompute() {
     if (!interacting) requestProb();
     syncInputs();
     renderDetail();
+    renderCands();
     draw();
   });
 }
@@ -68,22 +104,39 @@ const RAIL = 0.15; // 나무 레일 + 쿠션 (화면용, m)
 const stage = $('stage');
 const mobileMq = matchMedia('(max-width: 960px)');
 const landscapeMq = matchMedia('(max-width: 960px) and (orientation: landscape) and (max-height: 600px)');
+const portraitMq = matchMedia('(orientation: portrait)');
 let S = 300, OX = 0, OY = 0;
 let vertical = false; // 세로 화면에서는 테이블을 90° 돌려서 더 크게 표시
 let lastBox = '';
+const layoutEl = document.querySelector<HTMLElement>('.layout')!;
+const PANEL_MIN = 270; // 와이드 모드 오른쪽 조작 패널 최소 폭
 function resize() {
-  // 가로 휴대폰: 그리드 칸 높이에 맞춤 / 세로 모바일: 화면 높이의 56%까지 / 데스크톱: 72%까지
-  const fill = landscapeMq.matches;
-  const boxW = stage.clientWidth;
-  const boxH = fill ? stage.clientHeight : Math.max(200, innerHeight * (mobileMq.matches ? 0.56 : 0.72));
   const fullL = TABLE.L + 2 * RAIL, fullW = TABLE.W + 2 * RAIL;
-  const sH = Math.min(boxW / fullL, boxH / fullW);
-  const sV = Math.min(boxW / fullW, boxH / fullL);
-  vertical = sV > sH * 1.1;
-  S = vertical ? sV : sH;
-  const w = (vertical ? fullW : fullL) * S, h = (vertical ? fullL : fullW) * S;
+  const wide = document.body.classList.contains('wide');
+  let w: number, h: number;
+  if (wide) {
+    // 와이드(가로 눕힘) 모드: 테이블은 가로로, 높이를 꽉 채우고 오른쪽에 조작 패널
+    const cs = getComputedStyle(layoutEl);
+    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 10;
+    const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const boxW = layoutEl.clientWidth - padX - PANEL_MIN, boxH = layoutEl.clientHeight - padY;
+    vertical = false;
+    S = Math.max(40, Math.min(boxW / fullL, boxH / fullW));
+    w = fullL * S; h = fullW * S;
+    stage.style.width = `${w}px`;
+  } else {
+    // 세로 모바일: 화면 높이의 56%까지 / 데스크톱: 72%까지. 더 크게 나오는 방향으로 테이블을 세운다
+    stage.style.width = '';
+    const boxW = stage.clientWidth;
+    const boxH = Math.max(200, innerHeight * (mobileMq.matches ? 0.56 : 0.72));
+    const sH = Math.min(boxW / fullL, boxH / fullW);
+    const sV = Math.min(boxW / fullW, boxH / fullL);
+    vertical = sV > sH * 1.1;
+    S = vertical ? sV : sH;
+    w = (vertical ? fullW : fullL) * S; h = (vertical ? fullL : fullW) * S;
+  }
   const key = `${w}x${h}`;
-  stage.style.height = fill ? '' : `${h}px`;
+  stage.style.height = `${h}px`;
   const dpr = devicePixelRatio || 1;
   if (key !== lastBox) {
     lastBox = key;
@@ -293,10 +346,14 @@ type Drag =
 let drag: Drag | null = null;
 let locked = false;
 const TAP_SLOP = 6; // px
-function screenPos(ev: PointerEvent): [number, number] {
-  const r = cv.getBoundingClientRect();
-  return [ev.clientX - r.left, ev.clientY - r.top];
+// 포인터 위치 → 요소 자신의 좌표. 회전(와이드) 모드에서는 화면이 시계 방향 90° 돌아가 있으므로 역변환
+function localXY(el: Element, ev: PointerEvent): [number, number] {
+  const r = el.getBoundingClientRect();
+  return document.body.classList.contains('rotated')
+    ? [ev.clientY - r.top, r.right - ev.clientX]
+    : [ev.clientX - r.left, ev.clientY - r.top];
 }
+const screenPos = (ev: PointerEvent) => localXY(cv, ev);
 cv.addEventListener('pointerdown', (ev) => {
   if (anim) { anim = null; draw(); }
   const [sx, sy] = screenPos(ev);
@@ -338,7 +395,9 @@ function endDrag() {
     aimAt(layout[drag.id]);
     navigator.vibrate?.(8);
   }
+  const movedBall = drag.kind === 'ball' && drag.moved;
   drag = null;
+  if (movedBall) layoutChanged();
   interacting = false;
   recompute();
 }
@@ -372,13 +431,14 @@ lockBtn.addEventListener('click', () => {
 const jog = $('jog');
 let jogX: number | null = null, jogOffset = 0;
 jog.addEventListener('pointerdown', (ev) => {
-  jogX = ev.clientX; jog.setPointerCapture(ev.pointerId); jog.classList.add('active');
+  jogX = localXY(jog, ev)[0]; jog.setPointerCapture(ev.pointerId); jog.classList.add('active');
   interacting = true; updateJogText();
 });
 jog.addEventListener('pointermove', (ev) => {
   if (jogX === null) return;
-  const dx = ev.clientX - jogX;
-  jogX = ev.clientX;
+  const x = localXY(jog, ev)[0];
+  const dx = x - jogX;
+  jogX = x;
   jogOffset += dx;
   jog.style.backgroundPositionX = `${jogOffset}px`;
   shot.angleDeg = norm(shot.angleDeg - dx * 0.02);
@@ -412,6 +472,7 @@ const cueSel = $('cueSel');
 cueSel.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
   shot.cue = b.dataset.v as BallId;
   recompute();
+  layoutChanged();
 }));
 const presetSel = $<HTMLSelectElement>('preset');
 PRESETS.forEach((p, i) => presetSel.add(new Option(p.name, String(i))));
@@ -420,8 +481,9 @@ presetSel.addEventListener('change', () => {
   if (presetSel.value === 'rand') {
     for (const id of BALL_IDS) placeBall(id, { x: R + Math.random() * (TABLE.L - 2 * R), y: R + Math.random() * (TABLE.W - 2 * R) });
   } else layout = clone(PRESETS[+presetSel.value].layout);
-  sysRes = null; candidates = []; renderCands();
+  sysRes = null;
   recompute();
+  layoutChanged();
 });
 const coordBody = $('coords');
 for (const id of BALL_IDS) {
@@ -436,6 +498,7 @@ coordBody.querySelectorAll('input').forEach((inp) => inp.addEventListener('chang
   const p = { ...layout[id], [ax]: parseFloat(inp.value) * DIAMOND };
   placeBall(id, p);
   recompute();
+  layoutChanged();
 }));
 
 // ───────── 패널: 샷 설정 ─────────
@@ -468,9 +531,9 @@ function drawTip() {
 }
 let tipDrag = false;
 function setTip(ev: PointerEvent) {
-  const rc = tipCv.getBoundingClientRect();
-  const r = rc.width / 2 - 6;
-  let tx = (ev.clientX - rc.left - rc.width / 2) / r, ty = -(ev.clientY - rc.top - rc.height / 2) / r;
+  const half = tipCv.clientWidth / 2, r = half * (60 / 66); // 그림 반지름 = 132px 기준 60px
+  const [lx, ly] = localXY(tipCv, ev);
+  let tx = (lx - half) / r, ty = -(ly - half) / r;
   const d = Math.hypot(tx, ty);
   if (d > TIP_MAX) { tx *= TIP_MAX / d; ty *= TIP_MAX / d; }
   shot.tipX = Math.round(tx * 100) / 100; shot.tipY = Math.round(ty * 100) / 100;
@@ -515,7 +578,8 @@ function renderDetail() {
   const o = result.outcome;
   const v = $('verdict');
   v.className = `verdict ${o.scored ? 'ok' : 'fail'}`;
-  v.innerHTML = `<b>${o.scored ? '득점 예상' : '실패 예상'}</b>${o.reason}${prob === null ? '' : `<span class="p">성공 확률 ${Math.round(prob * 100)}%</span>`}`;
+  const ci = currentCand();
+  v.innerHTML = `${ci >= 0 ? `<span class="rec-tag">추천 ${ci + 1}</span>` : ''}<b>${o.scored ? '득점 예상' : '실패 예상'}</b>${o.reason}${prob === null ? '' : `<span class="p">성공 확률 ${Math.round(prob * 100)}%</span>`}`;
   const cueEvents = result.events.filter((e) => e.ball === shot.cue || e.other === shot.cue);
   const seq = o.cueCushions.map((w) => WALL_KO[w].replace(' ', '')).join(' → ') || '없음';
   const probHtml = prob === null
@@ -538,31 +602,154 @@ function renderDetail() {
 }
 const posTxt = (p: Pos) => `${(p.x / DIAMOND).toFixed(1)}, ${(p.y / DIAMOND).toFixed(1)}`;
 
+// ───────── 추천 샷 (메인 기능) ─────────
+// 1) 여러 힘·당점 조합으로 360° 전 방향을 병렬 시뮬레이션 → 득점 각도 구간 수집
+// 2) 구간이 넓은 상위 후보를 스트로크 오차 30회로 재평가 → 성공 확률 순 정렬
+const MODES = {
+  fast: [
+    ...[-0.3, 0, 0.3].map((tipX) => ({ tipX, tipY: 0.2, speed: 3.0 })),
+    ...[-0.3, 0.3].map((tipX) => ({ tipX, tipY: 0.2, speed: 4.2 })),
+  ],
+  fine: [
+    ...[-0.4, -0.2, 0, 0.2, 0.4].flatMap((tipX) => [2.2, 3.0, 4.2].map((speed) => ({ tipX, tipY: 0.2, speed }))),
+    ...[-0.3, 0.3].map((tipX) => ({ tipX, tipY: -0.3, speed: 3.4 })),
+  ],
+};
+let recMode: keyof typeof MODES = 'fast';
+let searchGen = 0;
+let activeSearch: { cancel(): void } | null = null;
+
+function setProgress(p: number | null, text = '') {
+  $('progress').classList.toggle('hidden', p === null);
+  if (p !== null) ($('progress').firstElementChild as HTMLElement).style.width = `${p * 100}%`;
+  $('recStatus').innerHTML = text;
+}
+
+async function recommend() {
+  activeSearch?.cancel();
+  const gen = ++searchGen;
+  const lay = clone(layout);
+  const base = { ...shot };
+  candidates = []; renderCands();
+  const variants = MODES[recMode];
+  const t0 = performance.now();
+  setProgress(0, `득점 경로 탐색 중… (${variants.length}가지 힘·당점 × 900방향)`);
+  // 힘·당점 조합마다 360°를 4조각으로 나눠 코어에 고르게 분배
+  const STEP = 0.4, N = Math.round(360 / STEP), CHUNKS = 4;
+  const jobs = variants.flatMap((v, vi) => Array.from({ length: CHUNKS }, (_, c) => ({
+    vi, req: { kind: 'scan', id: 0, layout: lay, shot: { ...base, ...v }, step: STEP,
+      from: Math.floor((c * N) / CHUNKS), to: Math.floor(((c + 1) * N) / CHUNKS) } as WorkerRequest,
+  })));
+  const scan = runPool<Extract<WorkerResponse, { kind: 'scan' }>>(
+    jobs.map((j) => j.req),
+    (p) => { if (gen === searchGen) setProgress(p * 0.8, `득점 경로 탐색 중… ${Math.round(p * 100)}%`); },
+  );
+  activeSearch = scan;
+  const scans = await scan.promise;
+  if (gen !== searchGen) return;
+  const okAll = variants.map(() => new Uint8Array(N));
+  scans.forEach((r, k) => okAll[jobs[k].vi].set(r.ok, (jobs[k].req as { from: number }).from));
+  let cands: Candidate[] = okAll.flatMap((ok, vi) => findRanges(ok, STEP).map((g) => ({ ...g, ...variants[vi], prob: 0 })));
+  cands.sort((a, b) => b.width - a.width);
+  cands = cands.slice(0, 14);
+  const ev = runPool<Extract<WorkerResponse, { kind: 'eval' }>>(
+    cands.map((c) => ({ kind: 'eval', id: 0, layout: lay, shot: { ...base, ...c }, n: 30 })),
+    (p) => { if (gen === searchGen) setProgress(0.8 + p * 0.2, '성공 확률 계산 중…'); },
+  );
+  activeSearch = ev;
+  const evals = await ev.promise;
+  if (gen !== searchGen) return;
+  cands.forEach((c, i) => { c.prob = evals[i].prob; c.summary = evals[i].summary; });
+  cands.sort((a, b) => b.prob - a.prob || b.width - a.width);
+  // 거의 같은 샷(각도 1° 이내, 같은 당점·힘) 중복 제거
+  const kept: Candidate[] = [];
+  for (const c of cands) {
+    if (kept.some((k) => Math.abs(k.angleDeg - c.angleDeg) < 1 && k.tipX === c.tipX && k.speed === c.speed)) continue;
+    kept.push(c);
+    if (kept.length === 6) break;
+  }
+  candidates = kept;
+  activeSearch = null;
+  const sec = ((performance.now() - t0) / 1000).toFixed(1);
+  setProgress(null, candidates.length
+    ? `득점 가능한 샷 ${candidates.length}개 · ${sec}초 · 카드를 탭하면 경로 표시, 한 번 더 탭하면 재생`
+    : `득점 경로를 찾지 못했습니다${recMode === 'fast' ? ' — <b>정밀</b> 모드로 다시 시도해 보세요' : ''}`);
+  if (candidates.length) applyCandidate(0);
+  else renderCands();
+}
+
+let recTimer = 0;
+function layoutChanged() {
+  activeSearch?.cancel(); searchGen++;
+  candidates = []; renderCands();
+  clearTimeout(recTimer);
+  if (!($('autoRec') as HTMLInputElement).checked) { setProgress(null, '배치가 바뀌었습니다. <b>추천 받기</b>를 눌러 주세요.'); return; }
+  setProgress(null, '배치 변경 — 곧 추천을 시작합니다');
+  recTimer = window.setTimeout(recommend, 450);
+}
+
+function applyCandidate(i: number) {
+  const c = candidates[i];
+  Object.assign(shot, { angleDeg: c.angleDeg, speed: c.speed, tipX: c.tipX, tipY: c.tipY });
+  sysRes = null;
+  recompute();
+}
+const currentCand = () => candidates.findIndex((c) =>
+  c.angleDeg === shot.angleDeg && c.speed === shot.speed && c.tipX === shot.tipX && c.tipY === shot.tipY);
+
+const WALL_SHORT: Record<Wall, string> = { top: '상', bottom: '하', left: '좌', right: '우' };
+function thicknessText(t: number) {
+  const k = Math.max(1, Math.round(t * 8));
+  return k >= 8 ? '정면' : ['', '1/8', '1/4', '3/8', '1/2', '5/8', '3/4', '7/8'][k] + ' 두께';
+}
+function tipIcon(tx: number, ty: number) {
+  const x = 12 + tx * 10, y = 12 - ty * 10;
+  return `<svg class="tipico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10.5"/><circle class="d" cx="${x}" cy="${y}" r="2.6"/></svg>`;
+}
+function tipLabel(tx: number, ty: number) {
+  const side = Math.abs(tx) < 0.03 ? '중앙' : `${tx > 0 ? '우' : '좌'} ${(Math.abs(tx) / 0.2).toFixed(1)}팁`;
+  const vert = Math.abs(ty) < 0.03 ? '' : ` · ${ty > 0 ? '상' : '하'} ${(Math.abs(ty) / 0.2).toFixed(1)}팁`;
+  return side + vert;
+}
 function renderCands() {
   const ol = $('cands');
-  if (!candidates.length) { ol.innerHTML = searchId ? '<li class="note">득점 경로를 찾지 못했습니다. 힘/당점을 바꾸거나 "당점·힘도 탐색"을 켜 보세요.</li>' : ''; return; }
-  ol.innerHTML = candidates.map((c) => `<li>
-      <b>${c.angleDeg.toFixed(1)}°</b> · 힘 ${c.speed.toFixed(2)} · 좌우 ${c.tipX > 0 ? '우' : c.tipX < 0 ? '좌' : ''}${(Math.abs(c.tipX) / 0.2).toFixed(1)}팁
-      <br><span class="note">성공 확률 ${Math.round(c.prob * 100)}% · 허용 각도폭 ${c.width.toFixed(1)}°</span></li>`).join('');
-  ol.querySelectorAll('li').forEach((li, i) => li.addEventListener('click', () => {
-    const c = candidates[i];
-    Object.assign(shot, { angleDeg: c.angleDeg, speed: c.speed, tipX: c.tipX, tipY: c.tipY });
-    recompute();
+  const cur = currentCand();
+  ol.innerHTML = candidates.map((c, i) => {
+    const s = c.summary;
+    const pct = Math.round(c.prob * 100);
+    const color = c.prob > 0.6 ? 'var(--ok)' : c.prob > 0.3 ? 'var(--warn)' : 'var(--fail)';
+    const dot = (id: BallId) => `<span class="ball-dot" style="background:${COLORS[id]}"></span>${KO[id]}`;
+    const route = s?.firstHit
+      ? `${dot(s.firstHit)}${s.thickness !== undefined ? ` <i>${thicknessText(s.thickness)}</i>` : ' <i>(쿠션 먼저)</i>'}
+         → ${s.cushions.map((w) => WALL_SHORT[w]).join('·') || '—'} → ${s.secondHit ? dot(s.secondHit) : '—'}`
+      : '';
+    return `<li class="card${i === cur ? ' on' : ''}" data-i="${i}">
+      <div class="card-top"><span class="rank">${i + 1}</span>
+        <div class="prob"><b style="color:${color}">${pct}%</b><div class="bar"><div style="width:${pct}%;background:${color}"></div></div></div>
+        ${i === cur ? '<span class="tag">적용됨 · 탭=재생</span>' : ''}</div>
+      <div class="route">${route}${s?.kiss ? ' <span class="kiss">키스 주의</span>' : ''}</div>
+      <div class="params">${tipIcon(c.tipX, c.tipY)} ${tipLabel(c.tipX, c.tipY)} · 힘 ${c.speed.toFixed(1)} · ${c.angleDeg.toFixed(1)}° <span class="note">(허용폭 ${c.width.toFixed(1)}°)</span></div>
+    </li>`;
+  }).join('');
+  ol.querySelectorAll<HTMLElement>('.card').forEach((li) => li.addEventListener('click', () => {
+    const i = +li.dataset.i!;
+    if (i === currentCand()) { startAnim(); return; } // 이미 적용된 카드를 다시 탭하면 재생
+    applyCandidate(i);
   }));
 }
-$('search').addEventListener('click', () => {
-  searchId = ++reqId;
-  candidates = [];
-  $('cands').innerHTML = '';
-  $('progress').classList.remove('hidden');
-  send({ kind: 'search', id: searchId, layout, shot, wide: ($('wide') as HTMLInputElement).checked });
-});
+$('recBtn').addEventListener('click', () => { clearTimeout(recTimer); recommend(); });
+$('recMode').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
+  recMode = b.dataset.v as keyof typeof MODES;
+  $('recMode').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  clearTimeout(recTimer); recommend();
+}));
 
 // ───────── 재생 ─────────
-$('play').addEventListener('click', () => {
+function startAnim() {
   anim = { start: performance.now(), rate: ($('slow') as HTMLInputElement).checked ? 0.5 : 1 };
   draw();
-});
+}
+$('play').addEventListener('click', startAnim);
 ['grid', 'others'].forEach((id) => $(id).addEventListener('change', draw));
 
 // ───────── 다이아몬드 시스템 ─────────
@@ -621,7 +808,43 @@ tabBtns.forEach((b) => b.addEventListener('click', () => {
 }));
 
 new ResizeObserver(resize).observe(stage);
-mobileMq.addEventListener('change', resize);
-landscapeMq.addEventListener('change', resize);
+// ───────── 큰 테이블(와이드) 모드 ─────────
+// 세로로 든 휴대폰에서도 화면 전체를 90° 돌려 가로 당구대처럼 크게 표시. 실제로 가로로 돌리면 회전 없이 같은 배치
+let wideMode = false;
+const wideBtn = $('wideBtn');
+function applyMode() {
+  const rotated = wideMode && portraitMq.matches && mobileMq.matches;
+  const wide = rotated || landscapeMq.matches;
+  document.body.classList.toggle('rotated', rotated);
+  document.body.classList.toggle('wide', wide);
+  wideBtn.setAttribute('aria-pressed', String(wideMode));
+  wideBtn.textContent = wideMode ? '↩ 기본' : '⤢ 크게';
+  wideBtn.hidden = !mobileMq.matches || (!portraitMq.matches && !wideMode);
+  lastBox = '';
+  resize();
+}
+wideBtn.addEventListener('click', async () => {
+  wideMode = !wideMode;
+  // 안드로이드 등 지원 기기: 전체화면 + 가로 고정으로 진짜 회전. 미지원(iOS)이면 CSS 회전으로 대체
+  try {
+    if (wideMode) {
+      await document.documentElement.requestFullscreen?.();
+      await (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape');
+    } else if (document.fullscreenElement) {
+      screen.orientation?.unlock?.();
+      await document.exitFullscreen();
+    }
+  } catch { /* 지원하지 않으면 CSS 회전만 사용 */ }
+  applyMode();
+});
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && wideMode && !portraitMq.matches) { wideMode = false; applyMode(); }
+});
+[mobileMq, landscapeMq, portraitMq].forEach((mq) => mq.addEventListener('change', applyMode));
+applyMode();
 addEventListener('resize', resize);
 recompute();
+recommend();
+
+// 개발 서버에서만: 상태 확인용
+if (import.meta.env.DEV) (window as unknown as { __state: () => unknown }).__state = () => ({ layout, shot, candidates });
