@@ -14,7 +14,18 @@
   </header>
   <main class="layout">
     <section class="table-wrap">
-      <div class="stage" id="stage"><canvas id="table"></canvas></div>
+      <div class="stage" id="stage">
+        <canvas id="table"></canvas>
+        <!-- 와이드 모드 전용: 테이블 위 정보 표시 (추천 넘겨보기) -->
+        <div id="hud" class="hud">
+          <div id="hudVerdict" class="hud-verdict"></div>
+          <div id="hudRec" class="hud-rec">
+            <button id="hudPrev" aria-label="이전 추천">◀</button>
+            <span id="hudRecTxt"></span>
+            <button id="hudNext" aria-label="다음 추천">▶</button>
+          </div>
+        </div>
+      </div>
       <div class="table-bar">
         <button id="play" class="primary">▶ 재생</button>
         <button id="lock" class="toggle" aria-pressed="false" title="공 배치를 고정하고 터치는 겨냥에만 사용">🔓 배치</button>
@@ -30,11 +41,22 @@
       <div id="verdict" class="verdict"></div>
     </section>
 
+    <!-- 와이드 모드 전용: 오른쪽 도구 막대 -->
+    <nav class="rail" id="rail">
+      <button data-act="rec" title="추천 목록"><span class="ico">★</span><span>추천</span></button>
+      <button data-act="play" title="재생"><span class="ico">▶</span><span>재생</span></button>
+      <button data-act="shot" title="힘·당점·방향"><span class="ico">◎</span><span>샷</span></button>
+      <button data-act="dispute" title="이의제기"><span class="ico">⚑</span><span>이의</span></button>
+      <div id="railJog" class="rail-jog" title="위아래로 드래그해서 방향 미세 조정"><span id="railJogTxt">미세<br />조정</span></div>
+      <button data-act="exit" title="기본 화면으로"><span class="ico">↩</span><span>나가기</span></button>
+    </nav>
+
     <nav class="tabs" id="tabs">
       <button data-tab="0" class="on">★ 추천</button><button data-tab="1">배치</button><button data-tab="2">샷 조정</button><button data-tab="3">시스템</button>
     </nav>
 
     <aside class="panel" id="panel">
+      <div class="drawer-head"><b id="drawerTitle"></b><button id="drawerClose" aria-label="닫기">✕</button></div>
       <details open class="active rec">
         <summary>★ 추천 샷</summary>
         <div class="rec-head">
@@ -47,6 +69,8 @@
         <div id="recStatus" class="rec-status"></div>
         <div id="progress" class="progress hidden"><div></div></div>
         <ol id="cands" class="cards"></ol>
+        <button id="disputeBtn" class="dispute-entry hidden">추천이 아쉬운가요? <b>이의제기</b> — 내 샷 제안하기</button>
+        <p id="queueNote" class="note hidden"></p>
       </details>
 
       <details open>
@@ -70,6 +94,26 @@
 
       <details open>
         <summary>② 샷 직접 조정</summary>
+        <div id="disputeBox" class="dispute hidden">
+          <div class="dispute-head"><b>이의제기 중</b><span class="note">배치는 고정 · 테이블 겨냥/미세 조정, 힘, 당점만 바꿔 내 샷을 만드세요</span></div>
+          <div id="dCompare" class="d-compare"></div>
+          <div class="row d-row"><span class="lbl">사유</span>
+            <div class="chips" id="dReason">
+              <button data-v="better">더 좋은 길이 있음</button><button data-v="hard">추천이 치기 어려움</button>
+              <button data-v="physics">예측이 실제와 다름</button><button data-v="other">기타</button>
+            </div>
+          </div>
+          <div class="row d-row"><span class="lbl">실제</span>
+            <div class="seg" id="dActual">
+              <button data-v="untested" class="on">안 쳐봄</button><button data-v="scored">쳐서 득점</button><button data-v="missed">쳐서 실패</button>
+            </div>
+          </div>
+          <textarea id="dComment" maxlength="500" rows="2" placeholder="(선택) 왜 이 샷이 나은지, 실제로 공이 어디로 갔는지 등"></textarea>
+          <div class="row">
+            <button id="dSubmit" class="primary">제출</button><button id="dCancel">취소</button>
+            <span id="dMsg" class="note"></span>
+          </div>
+        </div>
         <div class="row">
           <span class="lbl">방향</span>
           <button class="mini" data-da="-1">−1°</button>

@@ -136,32 +136,64 @@ input[type='range'] { flex: 1; accent-color: var(--accent); min-width: 120px; }
   .row:has(#angle) #angle { flex: 1.4; min-width: 56px; }
 }
 /* ───────── 큰 테이블(와이드) 모드 ─────────
-   .wide    : 테이블 왼쪽 크게 + 오른쪽 조작 패널 (실제 가로 화면 또는 회전 모드)
+   .wide    : 테이블이 화면을 가득 채우고, 오른쪽엔 아이콘 도구 막대, 목록·설정은 덮어 여는 서랍
    .rotated : 세로로 든 휴대폰에서 화면 전체를 90° 돌려 가로처럼 사용 */
+.rail, .hud, .drawer-head { display: none; }
 body.wide { height: 100dvh; overflow: hidden; }
-body.wide .top { display: none; }
+body.wide .top, body.wide .tabs, body.wide .table-bar, body.wide .view-opts, body.wide .verdict { display: none; }
 body.wide .layout {
+  position: relative; overflow: hidden;
   display: grid; flex: 1; height: 100%; min-height: 0;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: auto auto auto minmax(0, 1fr);
-  gap: 6px 10px; padding: 8px 10px;
+  grid-template-columns: minmax(0, 1fr) 60px; grid-template-rows: minmax(0, 1fr);
+  gap: 0 6px; padding: 6px 6px 6px 8px;
 }
 body.wide .table-wrap { display: contents; }
-body.wide .stage { grid-column: 1; grid-row: 1 / -1; align-self: center; }
-body.wide .table-bar { grid-column: 2; grid-row: 1; margin: 0; flex-wrap: wrap; }
-body.wide .table-bar .jog { flex-basis: 100%; height: 34px; }
-body.wide .table-bar button { height: 36px; min-height: 0; padding: 4px 10px; font-size: 14px; }
-body.wide .view-opts { display: none; }
-body.wide .verdict { grid-column: 2; grid-row: 2; margin: 0; padding: 5px 10px; font-size: 12px; }
-body.wide .verdict b { font-size: 13px; }
-body.wide .tabs { display: flex; grid-column: 2; grid-row: 3; }
-body.wide .tabs button { height: 32px; font-size: 13px; }
-body.wide .panel { grid-column: 2; grid-row: 4; min-height: 0; overflow-y: auto; }
+body.wide .stage { grid-column: 1; grid-row: 1; align-self: center; justify-self: center; }
+
+/* 도구 막대 */
+body.wide .rail { display: flex; flex-direction: column; gap: 6px; grid-column: 2; grid-row: 1; min-height: 0; }
+.rail button {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  height: 50px; min-height: 0; padding: 0; border-radius: 12px; font-size: 10.5px; color: var(--muted);
+}
+.rail .ico { font-size: 19px; line-height: 1; color: var(--text); }
+.rail button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.rail button.on .ico { color: #fff; }
+.rail button[data-act='dispute'] .ico { color: var(--warn); }
+.rail-jog {
+  flex: 1; min-height: 50px; border-radius: 12px; border: 1px solid var(--line); touch-action: none; cursor: ns-resize;
+  display: flex; align-items: center; justify-content: center; text-align: center; font-size: 10.5px; color: var(--muted);
+  background-color: var(--panel-2);
+  background-image: repeating-linear-gradient(0deg, rgba(255,255,255,.18) 0 1px, transparent 1px 10px);
+  background-size: 40% 100%; background-repeat: repeat-y; background-position-x: 100%;
+}
+.rail-jog.active { border-color: var(--accent); color: var(--text); }
+.rail-jog span { pointer-events: none; background: var(--panel-2); border-radius: 6px; padding: 2px; font-variant-numeric: tabular-nums; }
+
+/* 테이블 위 정보 */
+body.wide .hud { display: flex; flex-direction: column; gap: 4px; position: absolute; left: 8px; top: 8px; max-width: calc(100% - 16px); pointer-events: none; z-index: 2; }
+.hud-verdict, .hud-rec { background: rgba(10, 14, 20, .78); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); border-radius: 10px; font-size: 12.5px; }
+.hud-verdict { padding: 4px 10px; align-self: flex-start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.hud-verdict.ok b { color: var(--ok); }
+.hud-verdict.fail b { color: var(--fail); }
+.hud-rec { display: flex; align-items: center; gap: 4px; padding: 2px; align-self: flex-start; pointer-events: auto; max-width: 100%; }
+.hud-rec button { min-height: 0; height: 30px; width: 34px; padding: 0; border-radius: 8px; background: rgba(255,255,255,.08); border: 0; }
+.hud-rec span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
+.hud-rec .r-prob { font-weight: 700; }
+.hud-rec.hidden { display: none; }
+
+/* 서랍 (목록·설정): 버튼을 누를 때만 테이블 위에 덮어서 연다 */
+body.wide .panel {
+  position: absolute; z-index: 5; top: 6px; bottom: 6px; right: 72px;
+  width: min(330px, 62%); padding: 0 12px 12px; border-radius: 14px;
+  background: rgba(22, 27, 34, .97); border: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0,0,0,.4);
+  overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  transform: translateX(calc(100% + 90px)); transition: transform .2s ease;
+}
+body.wide.drawer-open .panel { transform: none; }
+body.wide .drawer-head { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 1; background: inherit; padding: 10px 0 6px; }
+body.wide .drawer-head button { min-height: 0; height: 32px; width: 36px; padding: 0; }
 body.wide .tip-row .lbl, body.wide .tip-info .note { display: none; }
-body.wide #tip { width: 108px; height: 108px; }
-body.wide .panel .row { margin: 4px 0; }
-body.wide .verdict { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-body.wide .rec-head .big { height: 38px; }
 body.wide .sub-h, body.wide #detail { display: none; }
 body.rotated .layout {
   position: fixed; top: 0; left: 0;
@@ -196,3 +228,23 @@ body.rotated .layout {
 .rec-tag { background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; border-radius: 6px; padding: 2px 6px; margin-right: 8px; vertical-align: 2px; }
 .sub-h { margin: 14px 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
 .jog span { pointer-events: none; }
+
+/* ───────── 이의제기 ───────── */
+.dispute-entry { width: 100%; margin-top: 10px; background: transparent; border: 1px dashed #5a6676; color: var(--muted); padding: 10px; }
+.dispute-entry b { color: var(--warn); }
+.dispute { border: 1px solid var(--warn); background: #2a2414; border-radius: 12px; padding: 10px 12px; margin: 6px 0 12px; }
+.dispute-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.dispute-head b { color: var(--warn); }
+.d-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 12.5px; }
+.d-compare > div { background: var(--panel-2); border-radius: 8px; padding: 6px 8px; }
+.d-compare h5 { margin: 0 0 2px; font-size: 11.5px; color: var(--muted); font-weight: 600; }
+.d-compare .big { font-size: 15px; font-weight: 700; }
+.d-row { align-items: flex-start; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+.chips button { font-size: 13px; padding: 5px 9px; border-radius: 999px; }
+.chips button.on { background: var(--warn); border-color: var(--warn); color: #1b1606; font-weight: 600; }
+#dActual button { font-size: 13px; }
+#dComment { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font: inherit; font-size: 16px; resize: vertical; }
+body.disputing #stage { outline: 2px solid var(--warn); outline-offset: 2px; border-radius: 16px; }
+body.disputing .lock-hide { opacity: .4; pointer-events: none; }
+@media (min-width: 961px) { #dComment { font-size: 14px; } }

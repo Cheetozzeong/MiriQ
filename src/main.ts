@@ -1,6 +1,6 @@
 import './style.css';
 import {
-  BALL, BALL_IDS, DIAMOND, KO, TABLE, WALL_KO, simulate,
+  BALL, BALL_IDS, DIAMOND, KO, PHYS, TABLE, WALL_KO, simulate,
   type BallId, type Layout, type Pos, type Shot, type SimResult, type Wall,
 } from './physics';
 import { calibrate, railPoint, solveSystem, type SystemResult } from './systems';
@@ -37,7 +37,7 @@ const probe = newWorker();
 let reqId = 0, probId = 0;
 probe.onmessage = (ev: MessageEvent<WorkerResponse>) => {
   const m = ev.data;
-  if (m.kind === 'eval' && m.id === probId) { prob = m.prob; renderDetail(); }
+  if (m.kind === 'eval' && m.id === probId) { prob = m.prob; renderDetail(); renderDispute(); }
 };
 let probTimer = 0;
 function requestProb() {
@@ -93,6 +93,7 @@ function recompute() {
     syncInputs();
     renderDetail();
     renderCands();
+    renderDispute();
     draw();
   });
 }
@@ -109,17 +110,17 @@ let S = 300, OX = 0, OY = 0;
 let vertical = false; // 세로 화면에서는 테이블을 90° 돌려서 더 크게 표시
 let lastBox = '';
 const layoutEl = document.querySelector<HTMLElement>('.layout')!;
-const PANEL_MIN = 270; // 와이드 모드 오른쪽 조작 패널 최소 폭
+const RAIL_W = 66; // 와이드 모드 오른쪽 도구 막대 폭(간격 포함)
 function resize() {
   const fullL = TABLE.L + 2 * RAIL, fullW = TABLE.W + 2 * RAIL;
   const wide = document.body.classList.contains('wide');
   let w: number, h: number;
   if (wide) {
-    // 와이드(가로 눕힘) 모드: 테이블은 가로로, 높이를 꽉 채우고 오른쪽에 조작 패널
+    // 와이드(가로 눕힘) 모드: 테이블이 화면을 가득 채우고 오른쪽엔 얇은 도구 막대만
     const cs = getComputedStyle(layoutEl);
-    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 10;
+    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
     const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-    const boxW = layoutEl.clientWidth - padX - PANEL_MIN, boxH = layoutEl.clientHeight - padY;
+    const boxW = layoutEl.clientWidth - padX - RAIL_W, boxH = layoutEl.clientHeight - padY;
     vertical = false;
     S = Math.max(40, Math.min(boxW / fullL, boxH / fullW));
     w = fullL * S; h = fullW * S;
@@ -380,7 +381,7 @@ cv.addEventListener('pointermove', (ev) => {
   const p = toTable(sx, sy);
   if (drag.kind === 'ball') {
     if (!drag.moved && Math.hypot(sx - drag.sx, sy - drag.sy) < TAP_SLOP) return;
-    if (locked) { drag = { kind: 'aim' }; interacting = true; aimAt(p); return; }
+    if (locked || dispute) { drag = { kind: 'aim' }; interacting = true; aimAt(p); return; }
     drag.moved = true;
     interacting = true;
     placeBall(drag.id, { x: drag.from.x + p.x - drag.p0.x, y: drag.from.y + p.y - drag.p0.y });
@@ -427,34 +428,37 @@ lockBtn.addEventListener('click', () => {
   lockBtn.textContent = locked ? '🔒 배치' : '🔓 배치';
 });
 
-// 방향 미세 조정 조그: 좌우 드래그 1px = 0.02°
-const jog = $('jog');
-let jogX: number | null = null, jogOffset = 0;
-jog.addEventListener('pointerdown', (ev) => {
-  jogX = localXY(jog, ev)[0]; jog.setPointerCapture(ev.pointerId); jog.classList.add('active');
-  interacting = true; updateJogText();
-});
-jog.addEventListener('pointermove', (ev) => {
-  if (jogX === null) return;
-  const x = localXY(jog, ev)[0];
-  const dx = x - jogX;
-  jogX = x;
-  jogOffset += dx;
-  jog.style.backgroundPositionX = `${jogOffset}px`;
-  shot.angleDeg = norm(shot.angleDeg - dx * 0.02);
-  sysRes = null;
-  updateJogText();
-  recompute();
-});
-const jogEnd = () => {
-  if (jogX === null) return;
-  jogX = null; jog.classList.remove('active'); interacting = false;
-  $('jogTxt').textContent = '◀ 미세 조정 ▶';
-  recompute();
-};
-jog.addEventListener('pointerup', jogEnd);
-jog.addEventListener('pointercancel', jogEnd);
-function updateJogText() { $('jogTxt').textContent = `${shot.angleDeg.toFixed(2)}°`; }
+// 방향 미세 조정 조그: 드래그 1px = 0.02°. 아래쪽 바는 좌우, 와이드 모드 도구 막대는 위아래로 드래그
+function bindJog(el: HTMLElement, label: HTMLElement, axis: 0 | 1, idle: string) {
+  let last: number | null = null, offset = 0;
+  el.addEventListener('pointerdown', (ev) => {
+    last = localXY(el, ev)[axis]; el.setPointerCapture(ev.pointerId); el.classList.add('active');
+    interacting = true; label.textContent = `${shot.angleDeg.toFixed(2)}°`;
+  });
+  el.addEventListener('pointermove', (ev) => {
+    if (last === null) return;
+    const v = localXY(el, ev)[axis];
+    const d = v - last;
+    last = v;
+    offset += d;
+    el.style.setProperty(axis ? 'background-position-y' : 'background-position-x', `${offset}px`);
+    shot.angleDeg = norm(shot.angleDeg + (axis ? d : -d) * 0.02);
+    sysRes = null;
+    label.textContent = `${shot.angleDeg.toFixed(2)}°`;
+    recompute();
+  });
+  const end = () => {
+    if (last === null) return;
+    last = null; el.classList.remove('active'); interacting = false;
+    label.innerHTML = idle;
+    recompute();
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+}
+bindJog($('jog'), $('jogTxt'), 0, '◀ 미세 조정 ▶');
+bindJog($('railJog'), $('railJogTxt'), 1, '미세<br>조정');
+
 
 const norm = (a: number) => ((a % 360) + 360) % 360;
 window.addEventListener('keydown', (ev) => {
@@ -470,6 +474,7 @@ window.addEventListener('keydown', (ev) => {
 // ───────── 패널: 상황 입력 ─────────
 const cueSel = $('cueSel');
 cueSel.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+  if (dispute) return;
   shot.cue = b.dataset.v as BallId;
   recompute();
   layoutChanged();
@@ -478,6 +483,7 @@ const presetSel = $<HTMLSelectElement>('preset');
 PRESETS.forEach((p, i) => presetSel.add(new Option(p.name, String(i))));
 presetSel.add(new Option('랜덤 배치', 'rand'));
 presetSel.addEventListener('change', () => {
+  if (dispute) return;
   if (presetSel.value === 'rand') {
     for (const id of BALL_IDS) placeBall(id, { x: R + Math.random() * (TABLE.L - 2 * R), y: R + Math.random() * (TABLE.W - 2 * R) });
   } else layout = clone(PRESETS[+presetSel.value].layout);
@@ -494,6 +500,7 @@ for (const id of BALL_IDS) {
   coordBody.appendChild(tr);
 }
 coordBody.querySelectorAll('input').forEach((inp) => inp.addEventListener('change', () => {
+  if (dispute) { syncInputs(); return; }
   const id = inp.dataset.id as BallId, ax = inp.dataset.ax as 'x' | 'y';
   const p = { ...layout[id], [ax]: parseFloat(inp.value) * DIAMOND };
   placeBall(id, p);
@@ -580,6 +587,7 @@ function renderDetail() {
   v.className = `verdict ${o.scored ? 'ok' : 'fail'}`;
   const ci = currentCand();
   v.innerHTML = `${ci >= 0 ? `<span class="rec-tag">추천 ${ci + 1}</span>` : ''}<b>${o.scored ? '득점 예상' : '실패 예상'}</b>${o.reason}${prob === null ? '' : `<span class="p">성공 확률 ${Math.round(prob * 100)}%</span>`}`;
+  renderHud();
   const cueEvents = result.events.filter((e) => e.ball === shot.cue || e.other === shot.cue);
   const seq = o.cueCushions.map((w) => WALL_KO[w].replace(' ', '')).join(' → ') || '없음';
   const probHtml = prob === null
@@ -674,6 +682,7 @@ async function recommend() {
   setProgress(null, candidates.length
     ? `득점 가능한 샷 ${candidates.length}개 · ${sec}초 · 카드를 탭하면 경로 표시, 한 번 더 탭하면 재생`
     : `득점 경로를 찾지 못했습니다${recMode === 'fast' ? ' — <b>정밀</b> 모드로 다시 시도해 보세요' : ''}`);
+  $('disputeBtn').classList.remove('hidden');
   if (candidates.length) applyCandidate(0);
   else renderCands();
 }
@@ -681,15 +690,18 @@ async function recommend() {
 let recTimer = 0;
 function layoutChanged() {
   activeSearch?.cancel(); searchGen++;
-  candidates = []; renderCands();
+  $('disputeBtn').classList.add('hidden');
+  candidates = []; lastApplied = -1; renderCands();
   clearTimeout(recTimer);
   if (!($('autoRec') as HTMLInputElement).checked) { setProgress(null, '배치가 바뀌었습니다. <b>추천 받기</b>를 눌러 주세요.'); return; }
   setProgress(null, '배치 변경 — 곧 추천을 시작합니다');
   recTimer = window.setTimeout(recommend, 450);
 }
 
+let lastApplied = -1; // 마지막으로 적용한 추천 (이의제기 대상 기본값)
 function applyCandidate(i: number) {
   const c = candidates[i];
+  lastApplied = i;
   Object.assign(shot, { angleDeg: c.angleDeg, speed: c.speed, tipX: c.tipX, tipY: c.tipY });
   sysRes = null;
   recompute();
@@ -733,9 +745,11 @@ function renderCands() {
   }).join('');
   ol.querySelectorAll<HTMLElement>('.card').forEach((li) => li.addEventListener('click', () => {
     const i = +li.dataset.i!;
-    if (i === currentCand()) { startAnim(); return; } // 이미 적용된 카드를 다시 탭하면 재생
+    if (i === currentCand()) { closeDrawer(); startAnim(); return; } // 이미 적용된 카드를 다시 탭하면 재생
     applyCandidate(i);
+    closeDrawer(); // 와이드 모드: 테이블 전체로 경로 확인
   }));
+  renderHud();
 }
 $('recBtn').addEventListener('click', () => { clearTimeout(recTimer); recommend(); });
 $('recMode').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
@@ -796,16 +810,202 @@ $('sysCal').addEventListener('click', () => {
   }, 20);
 });
 
+// ───────── 이의제기 (데이터 수집) ─────────
+// 추천이 아쉬울 때: 배치는 고정한 채 방향·힘·당점만 바꿔 "내 샷"을 제안 → /api/feedback 으로 전송
+// 서버 저장소가 아직 없거나 오프라인이면 이 기기(localStorage)에 보관했다가 다음에 자동 재전송
+interface Dispute { rank: number; recs: Candidate[]; reason: string | null; actual: string }
+let dispute: Dispute | null = null;
+const QUEUE_KEY = 'miriq.feedbackQueue';
+const store = {
+  get<T>(k: string, d: T): T { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 저장 불가 환경 */ } },
+};
+function clientId() {
+  let id = store.get<string>('miriq.clientId', '');
+  if (!id) { id = crypto.randomUUID?.() ?? String(Math.random()).slice(2); store.set('miriq.clientId', id); }
+  return id;
+}
+
+function setDisputeLocks(on: boolean) {
+  document.body.classList.toggle('disputing', on);
+  [sections[1], tabBtns[1], $('recBtn'), $('recMode'), $('lock'), $('disputeBtn')].forEach((el) => el.classList.toggle('lock-hide', on));
+}
+function startDispute() {
+  const cur = currentCand();
+  const rank = cur >= 0 ? cur : lastApplied < candidates.length ? lastApplied : -1;
+  dispute = { rank, recs: clone(candidates), reason: null, actual: 'untested' };
+  ($('dComment') as HTMLTextAreaElement).value = '';
+  $('dMsg').textContent = '';
+  $('dReason').querySelectorAll('button').forEach((b) => b.classList.remove('on'));
+  $('dActual').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'untested'));
+  $('disputeBox').classList.remove('hidden');
+  setDisputeLocks(true);
+  selectTab(2);
+  renderDispute();
+}
+function endDispute(restore: boolean) {
+  if (!dispute) return;
+  const d = dispute;
+  dispute = null;
+  $('disputeBox').classList.add('hidden');
+  setDisputeLocks(false);
+  if (restore && d.rank >= 0 && candidates[d.rank]) applyCandidate(d.rank);
+  if (document.body.classList.contains('wide')) closeDrawer(); else selectTab(0);
+}
+function renderDispute() {
+  if (!dispute || !result) return;
+  const rec = dispute.rank >= 0 ? dispute.recs[dispute.rank] : null;
+  const s = rec?.summary;
+  const o = result.outcome;
+  const pct = (v: number | null) => (v === null ? '…' : `${Math.round(v * 100)}%`);
+  const routeOf = (first?: BallId, cush: Wall[] = [], second?: BallId) =>
+    first ? `${KO[first]} → ${cush.map((w) => WALL_SHORT[w]).join('·') || '—'} → ${second ? KO[second] : '—'}` : '적구 못 맞힘';
+  $('dCompare').innerHTML = `
+    <div><h5>추천 ${rec ? `#${dispute.rank + 1}` : '(없음)'}</h5>
+      ${rec ? `<div class="big">${pct(rec.prob)}</div><div>${routeOf(s?.firstHit, s?.cushions, s?.secondHit)}</div>
+      <div class="note">${tipLabel(rec.tipX, rec.tipY)} · 힘 ${rec.speed.toFixed(1)} · ${rec.angleDeg.toFixed(1)}°</div>` : '<div class="note">득점 추천이 없었던 배치</div>'}</div>
+    <div><h5>내 샷</h5>
+      <div class="big" style="color:${o.scored ? 'var(--ok)' : 'var(--fail)'}">${o.scored ? '득점' : '실패'} 예상 · ${pct(prob)}</div>
+      <div>${routeOf(o.firstHit, o.cueCushions, o.secondHit)}</div>
+      <div class="note">${tipLabel(shot.tipX, shot.tipY)} · 힘 ${shot.speed.toFixed(1)} · ${shot.angleDeg.toFixed(1)}°</div></div>`;
+}
+$('disputeBtn').addEventListener('click', startDispute);
+$('dCancel').addEventListener('click', () => endDispute(true));
+$('dReason').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
+  if (!dispute) return;
+  dispute.reason = b.dataset.v!;
+  $('dReason').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+}));
+$('dActual').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
+  if (!dispute) return;
+  dispute.actual = b.dataset.v!;
+  $('dActual').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+}));
+
+async function postFeedback(payload: unknown): Promise<{ ok: true; id: number } | { ok: false; retry: boolean }> {
+  try {
+    const res = await fetch('/api/feedback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+    if (res.ok) return { ok: true, id: (await res.json()).id };
+    return { ok: false, retry: res.status === 503 || res.status === 404 || res.status >= 500 };
+  } catch { return { ok: false, retry: true }; }
+}
+$('dSubmit').addEventListener('click', async () => {
+  if (!dispute) return;
+  if (!dispute.reason) { $('dMsg').innerHTML = '<span style="color:var(--warn)">사유를 골라 주세요</span>'; return; }
+  const o = result.outcome;
+  const pick = (c: Candidate) => ({ angleDeg: c.angleDeg, speed: c.speed, tipX: c.tipX, tipY: c.tipY, prob: c.prob, width: c.width, summary: c.summary });
+  const payload = {
+    v: 1, kind: 'dispute', clientId: clientId(), appVersion: __APP_VERSION__,
+    layout, cue: shot.cue, recMode,
+    recommended: dispute.recs.map(pick), disputedRank: dispute.rank,
+    userShot: { angleDeg: shot.angleDeg, speed: shot.speed, tipX: shot.tipX, tipY: shot.tipY },
+    userSim: { scored: o.scored, firstHit: o.firstHit ?? null, secondHit: o.secondHit ?? null, cushions: o.cueCushions, kiss: o.kiss, prob },
+    reason: dispute.reason, actualResult: dispute.actual,
+    comment: ($('dComment') as HTMLTextAreaElement).value.trim().slice(0, 500),
+    physics: PHYS, createdAt: new Date().toISOString(),
+  };
+  $('dMsg').textContent = '전송 중…';
+  const r = await postFeedback(payload);
+  if (r.ok) $('dMsg').innerHTML = `<span style="color:var(--ok)">제출 완료 (#${r.id}) — 고맙습니다!</span>`;
+  else if (r.retry) {
+    const q = store.get<unknown[]>(QUEUE_KEY, []);
+    q.push(payload); store.set(QUEUE_KEY, q);
+    $('dMsg').innerHTML = `<span style="color:var(--warn)">서버 저장소에 연결되지 않아 이 기기에 보관했습니다 (${q.length}건) — 연결되면 자동 전송</span>`;
+  } else { $('dMsg').innerHTML = '<span style="color:var(--fail)">전송 실패 (입력값 오류)</span>'; return; }
+  renderQueueNote();
+  setTimeout(() => endDispute(false), 1400);
+});
+
+// 보관된 피드백 재전송
+async function flushQueue() {
+  const q = store.get<unknown[]>(QUEUE_KEY, []);
+  if (!q.length) return;
+  const left: unknown[] = [];
+  for (const item of q) {
+    const r = await postFeedback(item);
+    if (!r.ok && r.retry) left.push(item);
+  }
+  store.set(QUEUE_KEY, left);
+  renderQueueNote();
+}
+function renderQueueNote() {
+  const n = store.get<unknown[]>(QUEUE_KEY, []).length;
+  $('queueNote').classList.toggle('hidden', !n);
+  $('queueNote').textContent = n ? `전송 대기 중인 이의제기 ${n}건 (이 기기에 보관됨)` : '';
+}
+
+// ───────── 와이드 모드: 도구 막대 · 서랍 · 테이블 위 정보 ─────────
+const railBtn = (act: string) => document.querySelector<HTMLButtonElement>(`#rail [data-act="${act}"]`)!;
+function openDrawer() {
+  document.body.classList.add('drawer-open');
+  railBtn('rec').classList.toggle('on', activeTab === 0);
+  railBtn('shot').classList.toggle('on', activeTab === 2 && !dispute);
+  railBtn('dispute').classList.toggle('on', activeTab === 2 && !!dispute);
+}
+function closeDrawer() {
+  document.body.classList.remove('drawer-open');
+  document.querySelectorAll('#rail button').forEach((b) => b.classList.remove('on'));
+}
+const drawerOpen = () => document.body.classList.contains('drawer-open');
+$('drawerClose').addEventListener('click', closeDrawer);
+document.querySelectorAll<HTMLButtonElement>('#rail button').forEach((b) => b.addEventListener('click', () => {
+  const act = b.dataset.act;
+  if (act === 'play') { closeDrawer(); startAnim(); return; }
+  if (act === 'exit') { wideBtn.click(); return; }
+  if (act === 'dispute') {
+    if (!dispute) { if (searchGen && !$('disputeBtn').classList.contains('hidden')) startDispute(); else { selectTab(0); return; } }
+    else if (drawerOpen() && activeTab === 2) closeDrawer(); else selectTab(2);
+    return;
+  }
+  const tab = act === 'rec' ? 0 : 2;
+  if (drawerOpen() && activeTab === tab) { closeDrawer(); return; }
+  if (tab === 0 && !candidates.length && !activeSearch) recommend();
+  selectTab(tab);
+}));
+// 서랍 밖(테이블)을 건드리면 서랍 닫기
+// (이의제기 중에는 서랍을 열어 둔 채 겨냥할 수 있게 유지)
+cv.addEventListener('pointerdown', () => { if (drawerOpen() && !dispute) closeDrawer(); });
+
+function renderHud() {
+  if (!result) return;
+  const o = result.outcome;
+  const hv = $('hudVerdict');
+  hv.className = `hud-verdict ${o.scored ? 'ok' : 'fail'}`;
+  hv.innerHTML = `<b>${o.scored ? '득점 예상' : '실패 예상'}</b>${prob === null ? '' : ` · 성공 ${Math.round(prob * 100)}%`}${dispute ? ' · <span style="color:var(--warn)">이의제기 중</span>' : ''}`;
+  const hr = $('hudRec');
+  hr.classList.toggle('hidden', !candidates.length || !!dispute);
+  if (!candidates.length) return;
+  const cur = currentCand();
+  const c = candidates[Math.max(0, cur)];
+  const s = c.summary;
+  const route = s?.firstHit ? ` · ${KO[s.firstHit]}${s.thickness !== undefined ? ` ${thicknessText(s.thickness)}` : ''} → ${s.cushions.map((w) => WALL_SHORT[w]).join('·')} → ${s.secondHit ? KO[s.secondHit] : '—'}` : '';
+  $('hudRecTxt').innerHTML = cur >= 0
+    ? `추천 ${cur + 1}/${candidates.length} · <span class="r-prob">${Math.round(c.prob * 100)}%</span>${route}`
+    : `추천 ${candidates.length}개 · ◀▶로 보기`;
+}
+const stepCand = (d: number) => {
+  if (!candidates.length) return;
+  const cur = currentCand();
+  applyCandidate(cur < 0 ? 0 : (cur + d + candidates.length) % candidates.length);
+};
+$('hudPrev').addEventListener('click', () => stepCand(-1));
+$('hudNext').addEventListener('click', () => stepCand(1));
+
 // ───────── 시작 ─────────
 // ───────── 모바일 탭 ─────────
 const tabBtns = [...document.querySelectorAll<HTMLButtonElement>('#tabs button')];
 const sections = [...document.querySelectorAll<HTMLDetailsElement>('#panel details')];
-tabBtns.forEach((b) => b.addEventListener('click', () => {
-  const i = +b.dataset.tab!;
-  tabBtns.forEach((x) => x.classList.toggle('on', x === b));
+const TAB_TITLES = ['★ 추천 샷', '배치', '샷 조정', '다이아몬드 시스템'];
+let activeTab = 0;
+function selectTab(i: number) {
+  activeTab = i;
+  $('drawerTitle').textContent = dispute && i === 2 ? '⚑ 이의제기' : TAB_TITLES[i];
+  if (document.body.classList.contains('wide')) openDrawer();
+  tabBtns.forEach((x, j) => x.classList.toggle('on', j === i));
   sections.forEach((d, j) => { d.classList.toggle('active', j === i); if (j === i) d.open = true; });
   $('panel').scrollTop = 0;
-}));
+}
+tabBtns.forEach((b) => b.addEventListener('click', () => selectTab(+b.dataset.tab!)));
 
 new ResizeObserver(resize).observe(stage);
 // ───────── 큰 테이블(와이드) 모드 ─────────
@@ -820,6 +1020,8 @@ function applyMode() {
   wideBtn.setAttribute('aria-pressed', String(wideMode));
   wideBtn.textContent = wideMode ? '↩ 기본' : '⤢ 크게';
   wideBtn.hidden = !mobileMq.matches || (!portraitMq.matches && !wideMode);
+  railBtn('exit').hidden = !wideMode;
+  if (!wide) closeDrawer();
   lastBox = '';
   resize();
 }
@@ -845,6 +1047,8 @@ applyMode();
 addEventListener('resize', resize);
 recompute();
 recommend();
+renderQueueNote();
+flushQueue();
 
 // 개발 서버에서만: 상태 확인용
 if (import.meta.env.DEV) (window as unknown as { __state: () => unknown }).__state = () => ({ layout, shot, candidates });
