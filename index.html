@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#12161c" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>3쿠션 샷 예측기</title>
+</head>
+<body>
+  <header class="top">
+    <h1>3쿠션 샷 예측기</h1>
+    <p class="sub">공 배치 → 방향·힘·당점 설정 → 결과 예측</p>
+  </header>
+  <main class="layout">
+    <section class="table-wrap">
+      <div class="stage" id="stage"><canvas id="table"></canvas></div>
+      <div class="table-bar">
+        <button id="play" class="primary">▶ 재생</button>
+        <button id="lock" class="toggle" aria-pressed="false" title="공 배치를 고정하고 터치는 겨냥에만 사용">🔓 배치</button>
+        <div id="jog" class="jog" title="좌우로 드래그해서 방향 미세 조정"><span id="jogTxt">◀ 미세 조정 ▶</span></div>
+      </div>
+      <div class="view-opts">
+        <label class="chk"><input type="checkbox" id="slow" /> 0.5배속</label>
+        <label class="chk"><input type="checkbox" id="grid" checked /> 격자</label>
+        <label class="chk"><input type="checkbox" id="others" checked /> 적구 경로</label>
+        <span class="hint">공 드래그 = 배치 · 적구 탭 = 그 공 정면 조준 · 빈 곳 터치/드래그 = 겨냥 · ←/→ 미세조정</span>
+      </div>
+      <div id="verdict" class="verdict"></div>
+    </section>
+
+    <nav class="tabs" id="tabs">
+      <button data-tab="0">상황</button><button data-tab="1" class="on">샷</button><button data-tab="2">결과</button><button data-tab="3">시스템</button>
+    </nav>
+
+    <aside class="panel" id="panel">
+      <details open>
+        <summary>① 상황 입력</summary>
+        <div class="row">
+          <span class="lbl">수구</span>
+          <div class="seg" id="cueSel">
+            <button data-v="white">흰공</button><button data-v="yellow">노란공</button>
+          </div>
+        </div>
+        <div class="row">
+          <span class="lbl">배치</span>
+          <select id="preset"></select>
+        </div>
+        <table class="coords">
+          <thead><tr><th></th><th>X (0~8)</th><th>Y (0~4)</th></tr></thead>
+          <tbody id="coords"></tbody>
+        </table>
+        <p class="note">좌표는 다이아몬드 단위 (왼쪽 아래 코너 = 0,0)</p>
+      </details>
+
+      <details open class="active">
+        <summary>② 샷 설정</summary>
+        <div class="row">
+          <span class="lbl">방향</span>
+          <button class="mini" data-da="-1">−1°</button>
+          <button class="mini" data-da="-0.1">−.1</button>
+          <input type="number" id="angle" step="0.1" inputmode="decimal" />
+          <button class="mini" data-da="0.1">+.1</button>
+          <button class="mini" data-da="1">+1°</button>
+        </div>
+        <div class="row">
+          <span class="lbl">힘</span>
+          <input type="range" id="speed" min="0.5" max="6" step="0.05" />
+          <span id="speedTxt" class="val"></span>
+        </div>
+        <div class="row tip-row">
+          <span class="lbl">당점</span>
+          <canvas id="tip" width="264" height="264"></canvas>
+          <div class="tip-info">
+            <div id="tipTxt" class="val"></div>
+            <button class="mini" id="tipReset">중앙</button>
+            <p class="note">공 그림을 터치/드래그.<br />1팁 = 공 반지름의 20%</p>
+          </div>
+        </div>
+      </details>
+
+      <details open>
+        <summary>③ 예측 결과</summary>
+        <div id="detail"></div>
+        <div class="row">
+          <button id="search" class="primary">추천 샷 탐색</button>
+          <label class="chk"><input type="checkbox" id="wide" /> 당점·힘도 탐색</label>
+        </div>
+        <div id="progress" class="progress hidden"><div></div></div>
+        <ol id="cands" class="cands"></ol>
+      </details>
+
+      <details>
+        <summary>④ 다이아몬드 시스템</summary>
+        <div class="row"><span class="lbl">1쿠션</span><select id="c1"></select></div>
+        <div class="row"><span class="lbl">2쿠션</span><select id="c2"></select></div>
+        <div class="row"><span class="lbl">3쿠션</span><select id="c3"></select></div>
+        <div class="row"><span class="lbl">도착점</span><input type="number" id="arr" step="0.25" value="4" inputmode="decimal" /><span class="note">다이아몬드</span></div>
+        <div class="row">
+          <button id="sysGeo">기하 계산 적용</button>
+          <button id="sysCal" class="primary">물리 보정 적용</button>
+        </div>
+        <div id="sysOut" class="sys-out"></div>
+      </details>
+    </aside>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
