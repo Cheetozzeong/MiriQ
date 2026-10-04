@@ -1,6 +1,6 @@
 import './style.css';
 import {
-  BALL, BALL_IDS, DIAMOND, KO, PHYS, SKILL, TABLE, WALL_KO, setTableSpeed, simulate,
+  BALL, BALL_IDS, DIAMOND, KO, PHYS, SKILL, TABLE, TABLE_SPEED, WALL_KO, setTableSpeed, simulate,
   type BallId, type Layout, type Pos, type Shot, type SimResult, type Skill, type TableSpeed, type Wall,
 } from './physics';
 import { calibrate, railPoint, solveSystem, type SystemResult } from './systems';
@@ -120,16 +120,20 @@ const RAIL_W = 66; // 와이드 모드 오른쪽 도구 막대 폭(간격 포함
 function resize() {
   const fullL = TABLE.L + 2 * RAIL, fullW = TABLE.W + 2 * RAIL;
   const wide = document.body.classList.contains('wide');
+  const portrait = document.body.classList.contains('portrait');
   let w: number, h: number;
-  if (wide) {
-    // 와이드(가로 눕힘) 모드: 테이블이 화면을 가득 채우고 오른쪽엔 얇은 도구 막대만
+  if (wide || portrait) {
+    // 와이드: 테이블이 화면을 가득 채우고 오른쪽엔 얇은 도구 막대만
+    // 세로 휴대폰: 하단 시트 위 영역을 테이블이 채움 (더 크게 나오는 방향으로 세움)
     const cs = getComputedStyle(layoutEl);
     const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
     const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-    const boxW = layoutEl.clientWidth - padX - RAIL_W, boxH = layoutEl.clientHeight - padY;
-    vertical = false;
-    S = Math.max(40, Math.min(boxW / fullL, boxH / fullW));
-    w = fullL * S; h = fullW * S;
+    const railW = ($('rail').offsetWidth || RAIL_W - 6) + 6;
+    const boxW = layoutEl.clientWidth - padX - railW, boxH = layoutEl.clientHeight - padY;
+    const sH = Math.min(boxW / fullL, boxH / fullW), sV = Math.min(boxW / fullW, boxH / fullL);
+    vertical = !wide && sV > sH * 1.05;
+    S = Math.max(30, vertical ? sV : sH);
+    w = (vertical ? fullW : fullL) * S; h = (vertical ? fullL : fullW) * S;
     stage.style.width = `${w}px`;
   } else {
     // 세로 모바일: 화면 높이의 56%까지 / 데스크톱: 72%까지. 더 크게 나오는 방향으로 테이블을 세운다
@@ -468,6 +472,8 @@ lockBtn.addEventListener('click', () => {
   locked = !locked;
   lockBtn.setAttribute('aria-pressed', String(locked));
   lockBtn.textContent = locked ? '🔒 배치' : '🔓 배치';
+  const rl = document.querySelector<HTMLElement>('#rail [data-act="lock"]');
+  if (rl) { rl.querySelector('.ico')!.textContent = locked ? '🔒' : '🔓'; rl.classList.toggle('on-lock', locked); }
 });
 
 // 방향 미세 조정 조그: 드래그 1px = 0.02°. 아래쪽 바는 좌우, 와이드 모드 도구 막대는 위아래로 드래그
@@ -741,7 +747,7 @@ async function recommend() {
   renderCands();
   const sec = ((performance.now() - t0) / 1000).toFixed(1);
   setProgress(null, candidates.length
-    ? `득점 샷 ${candidates.length}개 · ${sec}초 · 카드를 탭하면 경로, 한 번 더 탭하면 재생`
+    ? `득점 샷 ${candidates.length}개 · ${sec}초 <span class="rec-sum">(${prefsSummary()})</span>`
     : `득점 경로를 찾지 못했습니다${recMode === 'fast' ? ' — <b>정밀</b> 모드로 다시 시도해 보세요' : ''}`);
   $('disputeBtn').classList.remove('hidden');
   if (candidates.length) applyCandidate(0);
@@ -824,6 +830,15 @@ $('recMode').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addE
   $('recMode').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
   clearTimeout(recTimer); recommend();
 }));
+// ⚙ 추천 설정 접기/펼치기 (접힌 상태에선 현재 설정 요약을 상태줄에 표시)
+const recOpts = $('recOpts');
+recOpts.classList.add('collapsed');
+$('recOptBtn').addEventListener('click', () => {
+  const open = recOpts.classList.toggle('collapsed') === false;
+  $('recOptBtn').setAttribute('aria-expanded', String(open));
+});
+const prefsSummary = () => `${SKILL[prefs.skill as Skill].label} · 테이블 ${TABLE_SPEED[prefs.table as TableSpeed].label}${prefs.easyFirst ? ' · 쉬운 샷 우선' : ''}`;
+
 // 설정: 실력 단계 · 테이블 상태 · 쉬운 샷 우선
 function bindSeg(id: string, key: 'skill' | 'table', after: () => void) {
   const btns = $(id).querySelectorAll<HTMLButtonElement>('button');
@@ -1019,6 +1034,7 @@ function renderQueueNote() {
 const railBtn = (act: string) => document.querySelector<HTMLButtonElement>(`#rail [data-act="${act}"]`)!;
 function openDrawer() {
   document.body.classList.add('drawer-open');
+  document.body.classList.toggle('sheet-half', activeTab === 2);
   railBtn('rec').classList.toggle('on', activeTab === 0);
   railBtn('shot').classList.toggle('on', activeTab === 2 && !dispute);
   railBtn('dispute').classList.toggle('on', activeTab === 2 && !!dispute);
@@ -1028,10 +1044,28 @@ function closeDrawer() {
   document.querySelectorAll('#rail button').forEach((b) => b.classList.remove('on'));
 }
 const drawerOpen = () => document.body.classList.contains('drawer-open');
+// 와이드(서랍) 또는 세로 휴대폰(하단 시트): 패널을 펼치고 접는 구조
+const sheetLayout = () => document.body.classList.contains('wide') || document.body.classList.contains('portrait');
+
+// 하단 시트 손잡이: 탭하면 펼침/접힘, 위아래로 밀어서도 조작
+{
+  const handle = $('sheetHandle');
+  let y0: number | null = null;
+  handle.addEventListener('pointerdown', (ev) => { y0 = ev.clientY; handle.setPointerCapture(ev.pointerId); });
+  handle.addEventListener('pointerup', (ev) => {
+    if (y0 === null) return;
+    const dy = ev.clientY - y0;
+    y0 = null;
+    if (dy < -25) openDrawer(); else if (dy > 25) closeDrawer(); else if (drawerOpen()) closeDrawer(); else openDrawer();
+  });
+  handle.addEventListener('pointercancel', () => { y0 = null; });
+}
 $('drawerClose').addEventListener('click', closeDrawer);
 document.querySelectorAll<HTMLButtonElement>('#rail button').forEach((b) => b.addEventListener('click', () => {
   const act = b.dataset.act;
   if (act === 'play') { closeDrawer(); startAnim(); return; }
+  if (act === 'lock') { $('lock').click(); return; }
+  if (act === 'wide') { wideBtn.click(); return; }
   if (act === 'exit') { wideBtn.click(); return; }
   if (act === 'dispute') {
     if (!dispute) { if (searchGen && !$('disputeBtn').classList.contains('hidden')) startDispute(); else { selectTab(0); return; } }
@@ -1055,8 +1089,11 @@ function renderHud() {
   hv.innerHTML = `<b>${o.scored ? '득점 예상' : '실패 예상'}</b>${prob === null ? '' : ` · 성공 ${Math.round(prob * 100)}%`}${dispute ? ' · <span style="color:var(--warn)">이의제기 중</span>' : ''}`;
   const hr = $('hudRec');
   hr.classList.toggle('hidden', !candidates.length || !!dispute);
-  if (!candidates.length) return;
   const cur = currentCand();
+  $('hudMini').innerHTML = cur >= 0
+    ? `★ ${cur + 1}/${candidates.length} · ${Math.round(candidates[cur].prob * 100)}% ▾`
+    : `<span class="${o.scored ? 'ok' : 'fail'}">●</span> ${o.scored ? '득점' : '실패'}${prob === null ? '' : ` ${Math.round(prob * 100)}%`} ▾`;
+  if (!candidates.length) return;
   const c = candidates[Math.max(0, cur)];
   const s = c.summary;
   const route = s?.firstHit ? ` · ${KO[s.firstHit]}${s.thickness !== undefined ? ` ${thickLabel(s.thickness)}` : ''} → ${s.cushions.map((w) => WALL_SHORT[w]).join('·')} → ${s.secondHit ? KO[s.secondHit] : '—'}` : '';
@@ -1064,6 +1101,18 @@ function renderHud() {
     ? `추천 ${cur + 1}/${candidates.length} · <span class="r-prob">${Math.round(c.prob * 100)}%</span>${route}`
     : `추천 ${candidates.length}개 · ◀▶로 보기`;
 }
+// 접은 상태: 작은 알약(★ 1/6 · 60% 또는 득점/실패 예상)만 표시 — 테이블을 가리지 않게
+let hudFolded = (() => { try { return localStorage.getItem('miriq.hudFolded') === '1'; } catch { return false; } })();
+function setHudFolded(v: boolean) {
+  hudFolded = v;
+  $('hud').classList.toggle('folded', v);
+  try { localStorage.setItem('miriq.hudFolded', v ? '1' : '0'); } catch { /* 무시 */ }
+  renderHud();
+}
+$('hudFold').addEventListener('click', () => setHudFolded(true));
+$('hudMini').addEventListener('click', () => setHudFolded(false));
+$('hud').classList.toggle('folded', hudFolded);
+
 const stepCand = (d: number) => {
   if (!candidates.length) return;
   const cur = currentCand();
@@ -1083,7 +1132,7 @@ function setPlaceMode(id: BallId | null) {
   $('placeHint').innerHTML = id
     ? `<b style="color:var(--warn)">${KO[id]}</b> 위치를 테이블에서 탭하세요`
     : '공을 고른 뒤 테이블을 탭하면 그 자리에 놓입니다 (흰공 → 노란공 → 빨간공 순서로 자동 진행)';
-  if (id && document.body.classList.contains('wide')) closeDrawer();
+  if (id && sheetLayout()) closeDrawer(); // 공을 놓을 테이블이 보이도록 시트·서랍 접기
 }
 $('placeSel').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
   setPlaceMode(placeMode === b.dataset.v ? null : (b.dataset.v as BallId));
@@ -1178,12 +1227,16 @@ let activeTab = 0;
 function selectTab(i: number) {
   activeTab = i;
   $('drawerTitle').textContent = dispute && i === 2 ? '⚑ 이의제기' : TAB_TITLES[i];
-  if (document.body.classList.contains('wide')) openDrawer();
+  if (sheetLayout()) openDrawer();
   tabBtns.forEach((x) => x.classList.toggle('on', +x.dataset.tab! === i));
   sections.forEach((d, j) => { d.classList.toggle('active', j === i); if (j === i) d.open = true; });
   $('panel').scrollTop = 0;
 }
-tabBtns.forEach((b) => b.addEventListener('click', () => selectTab(+b.dataset.tab!)));
+tabBtns.forEach((b) => b.addEventListener('click', () => {
+  const i = +b.dataset.tab!;
+  if (document.body.classList.contains('portrait') && drawerOpen() && i === activeTab) { closeDrawer(); return; }
+  selectTab(i);
+}));
 
 new ResizeObserver(resize).observe(stage);
 // ───────── 큰 테이블(와이드) 모드 ─────────
@@ -1195,11 +1248,12 @@ function applyMode() {
   const wide = rotated || landscapeMq.matches;
   document.body.classList.toggle('rotated', rotated);
   document.body.classList.toggle('wide', wide);
+  document.body.classList.toggle('portrait', !wide && mobileMq.matches && portraitMq.matches);
   wideBtn.setAttribute('aria-pressed', String(wideMode));
   wideBtn.textContent = wideMode ? '↩ 기본' : '⤢ 크게';
   wideBtn.hidden = !mobileMq.matches || (!portraitMq.matches && !wideMode);
   railBtn('exit').hidden = !wideMode;
-  if (!wide) closeDrawer();
+  closeDrawer();
   lastBox = '';
   resize();
 }
@@ -1233,6 +1287,7 @@ initPhoto((l) => {
   recompute();
   layoutChanged();
   selectTab(0);
+  closeDrawer();
 });
 
 loadFromHash();

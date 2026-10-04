@@ -296,3 +296,78 @@ body.photo-open { overflow: hidden; }
 .ph-msg b { color: var(--text); }
 .ph-stage { flex: 1; min-height: 220px; display: flex; align-items: center; justify-content: center; }
 .ph-stage canvas { touch-action: none; border-radius: 8px; }
+
+[hidden] { display: none !important; }
+
+/* ───────── 하단 시트 (세로 휴대폰) ─────────
+   테이블은 위쪽을 크게, 오른쪽에 아이콘 막대, 탭·패널은 아래 시트(접힘: 첫 추천 카드까지 / 펼침: 화면 80%) */
+.sheet { display: contents; }
+.sheet-handle { display: none; }
+.rail [data-only] { display: none; }
+body.wide .rail [data-only='wide'] { display: flex; }
+body.portrait .rail [data-only='portrait'] { display: flex; }
+body.portrait .rail [data-act='dispute'] { display: none; }
+.rail .on-lock .ico { color: var(--warn); }
+
+body.portrait { --peek: clamp(190px, 36dvh, 290px); height: 100dvh; overflow: hidden; }
+body.portrait .top, body.portrait .table-bar, body.portrait .view-opts, body.portrait .verdict { display: none; }
+body.portrait .layout {
+  display: grid; flex: none; height: calc(100dvh - var(--peek)); min-height: 0; overflow: hidden;
+  grid-template-columns: minmax(0, 1fr) 52px; grid-template-rows: minmax(0, 1fr);
+  gap: 0 6px; padding: calc(6px + env(safe-area-inset-top)) 6px 8px 8px;
+}
+body.portrait .table-wrap { display: contents; }
+body.portrait .stage { grid-column: 1; grid-row: 1; align-self: center; justify-self: center; }
+body.portrait .rail { display: flex; flex-direction: column; gap: 6px; grid-column: 2; grid-row: 1; min-height: 0; }
+body.portrait .rail button { height: 48px; }
+body.portrait .hud { display: flex; flex-direction: column; gap: 4px; position: absolute; left: 6px; right: 6px; top: 6px; pointer-events: none; z-index: 2; }
+body.portrait .hud-rec { align-self: stretch; }
+body.portrait .hud-rec span { flex: 1; text-align: center; }
+body.portrait .sheet {
+  display: flex; flex-direction: column; position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  height: var(--peek); background: var(--panel); border-top: 1px solid var(--line);
+  border-radius: 16px 16px 0 0; box-shadow: 0 -10px 30px rgba(0,0,0,.45);
+  transition: height .22s ease; padding-bottom: env(safe-area-inset-bottom);
+}
+body.portrait.drawer-open .sheet { height: 82dvh; }
+/* 조정 탭·이의제기: 테이블에서 경로 변화를 보면서 조작하도록 절반만 */
+body.portrait.drawer-open.sheet-half .sheet { height: 54dvh; }
+body.portrait .sheet-handle { display: flex; justify-content: center; align-items: center; height: 22px; flex: none; cursor: grab; touch-action: none; }
+body.portrait .sheet-handle span { width: 40px; height: 5px; border-radius: 3px; background: #4a5666; }
+body.portrait .tabs { display: flex; flex: none; margin: 0 8px; }
+body.portrait .tabs button { height: 36px; min-height: 0; font-size: 14px; }
+body.portrait .panel { display: block; flex: 1; min-height: 0; overflow-y: auto; padding: 6px 12px 12px; }
+body.portrait .panel details { display: none; border: 0; padding: 0; background: transparent; }
+body.portrait .panel details.active { display: block; }
+body.portrait .panel summary { display: none; }
+body.portrait .rec-head { margin-top: 0; }
+
+/* 사진 입력: 버튼 줄 정리 */
+.ph-actions > input[type='file'] { display: none; }
+.ph-actions > button, .ph-actions > .file-btn { flex: 1 1 0; min-width: 0; white-space: nowrap; }
+.view-row { flex-wrap: wrap; }
+
+/* 테이블 위 정보: 접기/펼치기 */
+.hud-full { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hud-fold { width: 30px !important; font-size: 13px; }
+.hud-mini { display: none; pointer-events: auto; align-self: flex-start; min-height: 0; height: 28px; padding: 0 10px; border-radius: 14px;
+  background: rgba(10,14,20,.78); border: 1px solid rgba(255,255,255,.15); font-size: 12px; white-space: nowrap; }
+.hud.folded .hud-full { display: none; }
+.hud.folded .hud-mini { display: inline-flex; align-items: center; gap: 4px; }
+.hud-mini .ok { color: var(--ok); } .hud-mini .fail { color: var(--fail); }
+
+/* 추천 설정은 ⚙ 로 접기 (휴대폰), 데스크톱은 항상 표시 */
+.icon-btn { width: 44px; height: 44px; padding: 0; font-size: 18px; flex: none; }
+.icon-btn[aria-expanded='true'] { border-color: var(--accent); color: var(--accent); }
+.rec-opts.collapsed { display: none; }
+.rec-sum { font-size: 12px; color: var(--muted); }
+@media (min-width: 961px) { .rec-opts.collapsed { display: flex; } #recOptBtn, .rec-sum { display: none; } }
+body.portrait .rec-head .big, body.wide .rec-head .big { height: 40px; font-size: 14px; }
+body.portrait .rec-head .seg button, body.wide .rec-head .seg button { min-height: 40px; }
+body.portrait .icon-btn, body.wide .icon-btn { width: 40px; height: 40px; min-height: 40px; }
+body.portrait .rec-status { margin: 4px 0; font-size: 12px; }
+/* 사진 입력: 주요 버튼은 엄지가 닿는 화면 아래쪽에 */
+.ph-step[data-step='guide'] .ph-actions { margin-top: auto; }
+.ph-head b { display: inline-flex; gap: 6px; align-items: center; }
+.ph-actions button, .ph-actions .file-btn { min-height: 48px; font-size: 15px; }
+#phCornersOk, #phShoot { min-height: 50px; }

@@ -18,12 +18,16 @@
         <canvas id="table"></canvas>
         <!-- 와이드 모드 전용: 테이블 위 정보 표시 (추천 넘겨보기) -->
         <div id="hud" class="hud">
-          <div id="hudVerdict" class="hud-verdict"></div>
-          <div id="hudRec" class="hud-rec">
-            <button id="hudPrev" aria-label="이전 추천">◀</button>
-            <span id="hudRecTxt"></span>
-            <button id="hudNext" aria-label="다음 추천">▶</button>
+          <div class="hud-full">
+            <div id="hudVerdict" class="hud-verdict"></div>
+            <div id="hudRec" class="hud-rec">
+              <button id="hudPrev" aria-label="이전 추천">◀</button>
+              <span id="hudRecTxt"></span>
+              <button id="hudNext" aria-label="다음 추천">▶</button>
+              <button id="hudFold" class="hud-fold" aria-label="접기">▴</button>
+            </div>
           </div>
+          <button id="hudMini" class="hud-mini" aria-label="추천 정보 펼치기"></button>
         </div>
       </div>
       <div class="table-bar">
@@ -33,9 +37,6 @@
         <div id="jog" class="jog" title="좌우로 드래그해서 방향 미세 조정"><span id="jogTxt">◀ 미세 조정 ▶</span></div>
       </div>
       <div class="view-opts">
-        <label class="chk"><input type="checkbox" id="slow" /> 0.5배속</label>
-        <label class="chk"><input type="checkbox" id="grid" checked /> 격자</label>
-        <label class="chk"><input type="checkbox" id="others" checked /> 적구 경로</label>
         <span class="hint">공 드래그 = 배치 · 적구 탭 = 그 공 정면 조준 · 빈 곳 터치/드래그 = 겨냥 · ←/→ 미세조정</span>
       </div>
       <div id="verdict" class="verdict"></div>
@@ -43,14 +44,18 @@
 
     <!-- 와이드 모드 전용: 오른쪽 도구 막대 -->
     <nav class="rail" id="rail">
-      <button data-act="rec" title="추천 목록"><span class="ico">★</span><span>추천</span></button>
+      <button data-act="rec" data-only="wide" title="추천 목록"><span class="ico">★</span><span>추천</span></button>
       <button data-act="play" title="재생"><span class="ico">▶</span><span>재생</span></button>
-      <button data-act="shot" title="힘·당점·방향"><span class="ico">◎</span><span>샷</span></button>
+      <button data-act="shot" data-only="wide" title="힘·당점·방향"><span class="ico">◎</span><span>샷</span></button>
+      <button data-act="lock" data-only="portrait" title="공 배치 고정"><span class="ico">🔓</span><span>배치</span></button>
+      <button data-act="wide" data-only="portrait" title="가로로 크게 보기"><span class="ico">⤢</span><span>크게</span></button>
       <button data-act="dispute" title="이의제기"><span class="ico">⚑</span><span>이의</span></button>
       <div id="railJog" class="rail-jog" title="위아래로 드래그해서 방향 미세 조정"><span id="railJogTxt">미세<br />조정</span></div>
-      <button data-act="exit" title="기본 화면으로"><span class="ico">↩</span><span>나가기</span></button>
+      <button data-act="exit" data-only="wide" title="기본 화면으로"><span class="ico">↩</span><span>나가기</span></button>
     </nav>
 
+    <div class="sheet" id="sheet">
+    <div class="sheet-handle" id="sheetHandle" aria-label="패널 펼치기/접기"><span></span></div>
     <nav class="tabs" id="tabs">
       <button data-tab="1">① 배치</button><button data-tab="0" class="on">② 추천</button><button data-tab="2">③ 조정</button><button data-tab="3">시스템</button>
     </nav>
@@ -60,12 +65,13 @@
       <details open class="active rec">
         <summary>★ 추천 샷</summary>
         <div class="rec-head">
-          <button id="recBtn" class="primary big">이 배치로 추천 받기</button>
+          <button id="recBtn" class="primary big">⟳ 추천 받기</button>
           <div class="seg" id="recMode" title="빠름: 당점 3종 · 정밀: 당점·힘·끌어치기 조합 17종">
             <button data-v="fast" class="on">빠름</button><button data-v="fine">정밀</button>
           </div>
+          <button id="recOptBtn" class="icon-btn" aria-expanded="false" title="추천 설정">⚙</button>
         </div>
-        <div class="rec-opts">
+        <div class="rec-opts" id="recOpts">
           <div class="opt"><span>실력</span><div class="seg sm" id="skillSel"><button data-v="beginner">입문</button><button data-v="intermediate">중급</button><button data-v="advanced">상급</button></div></div>
           <div class="opt"><span>테이블</span><div class="seg sm" id="tableSel"><button data-v="slow">느림</button><button data-v="normal">보통</button><button data-v="fast">빠름</button></div></div>
           <label class="chk"><input type="checkbox" id="easyFirst" checked /> 쉬운 샷 우선</label>
@@ -158,6 +164,12 @@
             <p class="note">공 그림을 터치/드래그.<br />1팁 = 공 반지름의 20%</p>
           </div>
         </div>
+        <div class="row view-row">
+          <span class="lbl">보기</span>
+          <label class="chk"><input type="checkbox" id="slow" /> 0.5배속</label>
+          <label class="chk"><input type="checkbox" id="grid" checked /> 격자</label>
+          <label class="chk"><input type="checkbox" id="others" checked /> 적구 경로</label>
+        </div>
         <h4 class="sub-h">현재 샷 예측</h4>
         <div id="detail"></div>
       </details>
@@ -175,6 +187,7 @@
         <div id="sysOut" class="sys-out"></div>
       </details>
     </aside>
+    </div>
   </main>
   <!-- 사진으로 배치 입력 -->
   <div id="photo" class="photo hidden" role="dialog" aria-label="사진으로 배치 입력">

@@ -232,9 +232,11 @@ export function initPhoto(onApply: (l: Layout) => void) {
       cctx.strokeStyle = i === dragI ? '#f5b942' : '#fff'; cctx.lineWidth = 2; cctx.stroke();
       cctx.beginPath(); cctx.arc(p.x * s, p.y * s, 2, 0, Math.PI * 2); cctx.fillStyle = '#fff'; cctx.fill();
       cctx.font = 'bold 12px sans-serif'; cctx.textAlign = 'center';
-      const ty = i < 2 ? p.y * s - 22 : p.y * s + 30;
-      cctx.fillStyle = 'rgba(0,0,0,.7)'; cctx.fillRect(p.x * s - 46, ty - 12, 92, 17);
-      cctx.fillStyle = '#fff'; cctx.fillText(LABELS[i], p.x * s, ty);
+      // 이름표가 화면 밖으로 잘리지 않게 안쪽으로 붙임
+      const ty = Math.min(cc.clientHeight - 6, Math.max(14, i < 2 ? p.y * s - 22 : p.y * s + 30));
+      const tx = Math.min(cc.clientWidth - 47, Math.max(47, p.x * s));
+      cctx.fillStyle = 'rgba(0,0,0,.7)'; cctx.fillRect(tx - 46, ty - 12, 92, 17);
+      cctx.fillStyle = '#fff'; cctx.fillText(LABELS[i], tx, ty);
     });
     if (dragI >= 0) {
       // 돋보기: 원본 이미지를 3배로
@@ -279,7 +281,12 @@ export function initPhoto(onApply: (l: Layout) => void) {
   // ── 위에서 본 모습 + 공 인식 ──
   const tc = $<HTMLCanvasElement>('phTop');
   const tctx = tc.getContext('2d')!;
-  let tScale = 1, bDrag: { id: BallId; from: Pos; p0: Pos } | null = null;
+  let tScale = 1, vert = false, bDrag: { id: BallId; from: Pos; p0: Pos } | null = null;
+  // 위에서 본 화면 좌표: 세로 화면에서는 테이블을 세워서(장축이 위쪽) 크게 표시
+  const toScreen = (p: Pos): [number, number] => {
+    const k = K * tScale;
+    return vert ? [(W - p.y) * k, (L - p.x) * k] : [p.x * k, (W - p.y) * k];
+  };
   $('phCornersOk').addEventListener('click', () => {
     if (!src) return;
     const H = homography(tablePts(), corners);
@@ -311,15 +318,20 @@ export function initPhoto(onApply: (l: Layout) => void) {
   });
   function drawTop() {
     if (!top || !balls) return;
-    tScale = fitCanvas(tc, top.width, top.height);
+    const box = tc.parentElement!;
+    vert = box.clientHeight > box.clientWidth * 1.1;
+    tScale = vert ? fitCanvas(tc, top.height, top.width) : fitCanvas(tc, top.width, top.height);
     const s = tScale;
+    tctx.save();
+    if (vert) { tctx.translate(0, top.width * s); tctx.rotate(-Math.PI / 2); }
     tctx.drawImage(top, 0, 0, top.width * s, top.height * s);
     tctx.strokeStyle = 'rgba(255,255,255,.25)'; tctx.lineWidth = 1;
     for (let i = 1; i < 8; i++) { const x = i * DIAMOND * K * s; tctx.beginPath(); tctx.moveTo(x, 0); tctx.lineTo(x, top.height * s); tctx.stroke(); }
     for (let j = 1; j < 4; j++) { const y = j * DIAMOND * K * s; tctx.beginPath(); tctx.moveTo(0, y); tctx.lineTo(top.width * s, y); tctx.stroke(); }
+    tctx.restore();
     for (const id of BALL_IDS) {
       const b = balls[id];
-      const x = b.pos.x * K * s, y = (W - b.pos.y) * K * s, r = Math.max(R * K * s, 7);
+      const [x, y] = toScreen(b.pos), r = Math.max(R * K * s, 7);
       tctx.lineWidth = 3; tctx.strokeStyle = '#000'; tctx.beginPath(); tctx.arc(x, y, r + 2, 0, Math.PI * 2); tctx.stroke();
       tctx.lineWidth = 2.5; tctx.strokeStyle = COLORS[id]; tctx.setLineDash(b.found ? [] : [4, 3]);
       tctx.beginPath(); tctx.arc(x, y, r + 2, 0, Math.PI * 2); tctx.stroke(); tctx.setLineDash([]);
@@ -332,8 +344,8 @@ export function initPhoto(onApply: (l: Layout) => void) {
     const p = local(tc, ev);
     let best: BallId | null = null, bd = 40;
     for (const id of BALL_IDS) {
-      const b = balls[id].pos;
-      const d = Math.hypot(b.x * K * tScale - p.x, (W - b.y) * K * tScale - p.y);
+      const [bx, by] = toScreen(balls[id].pos);
+      const d = Math.hypot(bx - p.x, by - p.y);
       if (d < bd) { bd = d; best = id; }
     }
     if (!best) return;
@@ -344,11 +356,13 @@ export function initPhoto(onApply: (l: Layout) => void) {
     if (!bDrag || !balls) return;
     const p = local(tc, ev);
     const k = K * tScale;
+    const dx = p.x - bDrag.p0.x, dy = p.y - bDrag.p0.y;
+    const mx = vert ? -dy / k : dx / k, my = vert ? -dx / k : -dy / k;
     balls[bDrag.id] = {
       found: true,
       pos: {
-        x: Math.min(L - R, Math.max(R, bDrag.from.x + (p.x - bDrag.p0.x) / k)),
-        y: Math.min(W - R, Math.max(R, bDrag.from.y - (p.y - bDrag.p0.y) / k)),
+        x: Math.min(L - R, Math.max(R, bDrag.from.x + mx)),
+        y: Math.min(W - R, Math.max(R, bDrag.from.y + my)),
       },
     };
     drawTop();
