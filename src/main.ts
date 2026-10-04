@@ -27,7 +27,7 @@ let prob: number | null = null;
 let sysRes: SystemResult | null = null;
 interface Candidate extends ScanRange {
   direct?: boolean; // 탐색 단계에서 본 1차 분류: 공을 먼저 맞힘
-  position?: number; // 후구 배치 (0~1): 득점 후 멈춘 배치에서 다음 샷의 쉬움
+  position?: number; // 후구 배치 (0~1): 득점 후 멈춘 배치에서 같은 수구로 칠 다음 샷의 최고 성공 확률
   defense?: number; // 수비 (0~1): 실패했을 때 상대가 치기 어려운 정도
   next?: Layout; // 이 샷 뒤 예상 배치
   tipX: number; tipY: number; speed: number; prob: number; score: number;
@@ -782,6 +782,7 @@ const PRIO: Record<Priority, { label: string; w: [number, number, number] }> = {
   balanced: { label: '균형', w: [0.7, 0.35, 0.35] },
 };
 let pool: Candidate[] = []; // 득점이 확인된 모든 후보 (기준을 바꾸면 여기서 다시 고름)
+let posDone = false; // 후구·수비 평가가 끝났는지
 let searchGen = 0;
 let activeSearch: { cancel(): void } | null = null;
 
@@ -812,8 +813,8 @@ function setTableLoading(text: string | null, p: number | null = null) {
 function rankCandidates(list: Candidate[], prio: Priority = prefs.priority as Priority, limit = 6) {
   const w = prefs.easyFirst ? 0.75 : 0.25;
   const [ws, wp, wd] = PRIO[prio].w;
-  // 아직 평가 전인 후구·수비는 약간 낮게(0.3) 가정 → 평가가 끝난 좋은 후보가 위로
-  for (const c of list) c.score = ws * c.prob * 100 + wp * (c.position ?? 0.3) * 100 + wd * (c.defense ?? 0.3) * 100 - w * (c.diff?.score ?? 0);
+  // 평가하지 않은 후보의 후구(다음 샷 성공 확률)는 낮게(0.1), 수비는 0.3으로 가정 → 평가가 끝난 좋은 후보가 위로
+  for (const c of list) c.score = ws * c.prob * 100 + wp * (c.position ?? 0.1) * 100 + wd * (c.defense ?? 0.3) * 100 - w * (c.diff?.score ?? 0);
   const pick = (group: Candidate[]) => {
     group.sort((a, b) => b.score - a.score);
     const out: Candidate[] = [], seen = new Set<string>();
@@ -886,8 +887,10 @@ async function recommend() {
   // 득점 우선이면 바로 1순위를 보여주고, 후구·수비는 뒤에서 계산해 카드에 채움
   const waitPos = prefs.priority !== 'score';
   if (!waitPos) { setProgress(null, doneText()); applyCandidate(0); }
-  // 3단계: 상위 후보(득점 기준 8개)의 후구 배치·수비 평가
-  const targets = rankCandidates(pool, 'score', 8);
+  // 3단계: 상위 후보(득점 기준 4개)의 후구 배치·수비 평가 — 후구는 다음 배치에 추천 엔진을 다시 돌려 계산
+  // (대기 시간을 줄이려고 4개만; 나머지 카드는 후구·수비 "—")
+  const targets = rankCandidates(pool, 'score', 4);
+  posDone = false;
   const posJob = runPool<Extract<WorkerResponse, { kind: 'pos' }>>(
     targets.map((c) => ({ kind: 'pos', id: 0, layout: lay, shot: { ...base, angleDeg: c.angleDeg, speed: c.speed, tipX: c.tipX, tipY: c.tipY }, err, table: prefs.table })),
     (p) => {
@@ -905,6 +908,7 @@ async function recommend() {
   await posJob.promise;
   if (gen !== searchGen) return;
   activeSearch = null;
+  posDone = true;
   const cur = currentCand() >= 0 ? candidates[currentCand()] : null;
   candidates = rankCandidates(pool);
   setProgress(null, doneText());
@@ -959,14 +963,14 @@ function tipLabel(tx: number, ty: number) {
 // 카드의 세 지표: 득점 확률 · 후구 배치 · 수비 (선택한 기준은 강조)
 function metricsHtml(c: Candidate) {
   const prio = prefs.priority as Priority;
-  const bar = (v: number | undefined) => {
-    if (v === undefined) return '<span class="wait">계산 중</span>';
-    const col = v > 0.6 ? 'var(--ok)' : v > 0.3 ? 'var(--warn)' : 'var(--fail)';
-    return `<span class="m-bar"><i style="width:${Math.round(v * 100)}%;background:${col}"></i></span>${v > 0.6 ? '좋음' : v > 0.3 ? '보통' : '나쁨'}`;
+  const bar = (v: number | undefined, label?: string, good = 0.6, ok = 0.3) => {
+    if (v === undefined) return `<span class="wait">${posDone ? '—' : '계산 중'}</span>`;
+    const col = v > good ? 'var(--ok)' : v > ok ? 'var(--warn)' : 'var(--fail)';
+    return `<span class="m-bar"><i style="width:${Math.round(Math.min(1, v / (good * 1.4)) * 100)}%;background:${col}"></i></span>${label ?? (v > good ? '좋음' : v > ok ? '보통' : '나쁨')}`;
   };
   return `<div class="metrics">
     <span class="metric${prio === 'score' ? ' prio' : ''}">득점 ${Math.round(c.prob * 100)}%</span>
-    <span class="metric${prio === 'position' ? ' prio' : ''}" title="득점 후 멈춘 배치에서 다음 샷의 쉬움">후구 ${bar(c.position)}</span>
+    <span class="metric${prio === 'position' ? ' prio' : ''}" title="득점 후 멈춘 배치에서 같은 수구로 칠 다음 샷의 최고 성공 확률">후구 ${bar(c.position, c.position === undefined ? undefined : `다음 ${Math.round(c.position * 100)}%`, 0.35, 0.12)}</span>
     <span class="metric${prio === 'defense' ? ' prio' : ''}" title="실패했을 때 상대가 치기 어려운 정도">수비 ${bar(c.defense)}</span>
   </div>`;
 }
@@ -1488,6 +1492,7 @@ function showGuide() {
   $('gRoute').innerHTML = s.firstHit
     ? `${KO[s.firstHit]} → ${s.cushions.map((w) => WALL_SHORT[w]).join('·') || '—'} → ${s.secondHit ? KO[s.secondHit] : '—'} ${result.outcome.scored ? '<b style="color:var(--ok)">득점</b>' : '<b style="color:var(--fail)">실패</b>'}${c ? ` · 성공 ${Math.round(c.prob * 100)}%` : ''}`
     : `<span style="color:var(--fail)">${result.outcome.reason}</span>`;
+  if (c?.position !== undefined) $('gRoute').innerHTML += `<br><span class="note">후구: 득점 후 다음 샷 예상 성공 ${Math.round(c.position * 100)}%</span>`;
   $('gPos').textContent = BALL_IDS.map((id) => `${KO[id]} ${(layout[id].x / DIAMOND).toFixed(1)},${(layout[id].y / DIAMOND).toFixed(1)}`).join(' · ') + ' (포인트)';
   $('guide').classList.remove('hidden');
 }
