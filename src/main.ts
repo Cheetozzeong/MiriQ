@@ -917,6 +917,7 @@ function layoutChanged() {
   updateOpening(); // 초구 여부(→ 1적구 자동 지정/해제)를 배치 기준으로 바로 반영
   hideAfterShot();
   hideGuide();
+  $('pendingRec').classList.add('hidden');
   activeSearch?.cancel(); searchGen++;
   $('disputeBtn').classList.add('hidden');
   candidates = []; pool = []; lastApplied = -1; renderCands();
@@ -924,7 +925,6 @@ function layoutChanged() {
   saveHistory();
   if (!($('autoRec') as HTMLInputElement).checked) {
     setProgress(null, '배치가 바뀌었습니다. <b>추천 받기</b>를 눌러 주세요.');
-    guideSoon();
     return;
   }
   setProgress(null, '배치 변경 — 곧 추천을 시작합니다');
@@ -933,13 +933,13 @@ function layoutChanged() {
 }
 
 let lastApplied = -1; // 마지막으로 적용한 추천 (이의제기 대상 기본값)
-function applyCandidate(i: number, guide = true) {
+function applyCandidate(i: number, guide = false) {
   const c = candidates[i];
   lastApplied = i;
   Object.assign(shot, { angleDeg: c.angleDeg, speed: c.speed, tipX: c.tipX, tipY: c.tipY });
   sysRes = null;
   recompute();
-  // 추천이 정해지거나 바뀌면 "어떻게 쳐야 하는지" 카드를 자동으로 (계산이 반영된 다음 프레임에)
+  // 안내 카드는 자동으로 띄우지 않음 — "이걸로 칠게요"를 눌렀을 때만 (테이블을 가리지 않게)
   if (guide) guideSoon();
 }
 const currentCand = () => candidates.findIndex((c) =>
@@ -994,10 +994,11 @@ function renderCands() {
       <div class="route">${route}${s?.kiss ? ' <span class="kiss">키스 주의</span>' : ''}</div>
       ${metricsHtml(c)}
       ${c.diff && c.diff.reasons.length ? `<div class="note">까다로운 점: ${c.diff.reasons.slice(0, 3).join(', ')}</div>` : ''}
-      ${i === cur ? '<div class="tag">적용됨 · 한 번 더 탭하면 재생</div>' : ''}
+      ${i === cur ? '<div class="tag">적용됨 · 한 번 더 탭하면 재생</div><button class="primary card-go" data-go="1">🎯 이걸로 칠게요</button>' : ''}
     </li>`;
   }).join('');
-  ol.querySelectorAll<HTMLElement>('.card').forEach((li) => li.addEventListener('click', () => {
+  ol.querySelectorAll<HTMLElement>('.card').forEach((li) => li.addEventListener('click', (ev) => {
+    if ((ev.target as HTMLElement).closest('[data-go]')) { goShoot(); return; }
     const i = +li.dataset.i!;
     if (candidates[i]?.pending) return;
     if (i === currentCand()) { closeDrawer(); startAnim(); return; } // 이미 적용된 카드를 다시 탭하면 재생
@@ -1315,6 +1316,7 @@ function renderHud() {
   hv.innerHTML = `<b>${o.scored ? '득점 예상' : '실패 예상'}</b>${prob === null ? '' : ` · 성공 ${Math.round(prob * 100)}%`}${dispute ? ' · <span style="color:var(--warn)">이의제기 중</span>' : ''}`;
   const hr = $('hudRec');
   hr.classList.toggle('hidden', !candidates.length || !!dispute);
+  $('hudGo').classList.toggle('hidden', !!dispute);
   const cur = currentCand();
   $('hudMini').innerHTML = cur >= 0
     ? `★ ${cur + 1}/${candidates.length} · ${Math.round(candidates[cur].prob * 100)}% ▾`
@@ -1490,12 +1492,23 @@ function showGuide() {
   $('guide').classList.remove('hidden');
 }
 function hideGuide() { clearTimeout(guideTimer); $('guide').classList.add('hidden'); }
-$('gOk').addEventListener('click', hideGuide);
 $('hudRecTxt').addEventListener('click', () => showGuide()); // 테이블 위 추천 표시를 누르면 다시 보기
-// 추천을 바꾸면 바로 띄우지 않고 1.5초 기다렸다가 표시 (그 사이 또 바꾸면 다시 기다림)
 let guideTimer = 0;
-const GUIDE_DELAY = 1500;
-const guideSoon = () => { hideGuide(); guideTimer = window.setTimeout(showGuide, GUIDE_DELAY); };
+const guideSoon = () => { hideGuide(); guideTimer = window.setTimeout(showGuide, 0); };
+
+// ───────── "이걸로 칠게요" → 안내 카드 → "치러 가기" → 결과 기록 대기 ─────────
+function goShoot() {
+  if (dispute) return;
+  hideAdj(); hideAfterShot();
+  if (isPortrait()) setSheet('min');
+  else closeDrawer();
+  showGuide();
+}
+$('hudGo').addEventListener('click', goShoot);
+$('gBack').addEventListener('click', hideGuide);
+// 치러 가기: 안내를 닫고, 치고 돌아와 바로 결과를 기록할 수 있게 작은 표시를 남김
+$('gOk').addEventListener('click', () => { hideGuide(); $('pendingRec').classList.remove('hidden'); });
+$('pendingRec').addEventListener('click', () => { $('pendingRec').classList.add('hidden'); showAfterShot(); });
 
 // ───────── 큰 화면 조정 시트: 방향(±·문지르기)·힘 ─────────
 function syncAdj() {
@@ -1523,6 +1536,7 @@ function toast(msg: string, ms = 2600) {
 }
 function showAfterShot() {
   if (dispute || !result) return;
+  $('pendingRec').classList.add('hidden');
   const o = result.outcome;
   $('asTitle').textContent = '실제로 쳐 보셨나요? 결과는?';
   $('asRun').textContent = runCount ? `연속 득점 ${runCount}점` : '';

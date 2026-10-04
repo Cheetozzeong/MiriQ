@@ -28,7 +28,10 @@
             </div>
           </div>
           <button id="hudMini" class="hud-mini" aria-label="추천 정보 펼치기"></button>
+          <button id="hudGo" class="hud-go">🎯 이걸로 칠게요</button>
         </div>
+        <!-- 치러 간 뒤: 결과 기록 대기 표시 (누르면 결과 카드) -->
+        <button id="pendingRec" class="pending-rec hidden">🎱 쳤나요? 결과 기록</button>
         <!-- 샷 안내 카드: 추천이 정해지거나 바뀌면 자동으로 나옴, 확인 누르면 들어감 -->
         <div id="guide" class="guide hidden" role="dialog" aria-label="샷 안내">
           <div class="g-head"><b id="gTitle">이렇게 치세요</b><span id="gLevel"></span></div>
@@ -42,7 +45,7 @@
           </div>
           <div class="g-route" id="gRoute"></div>
           <div class="g-pos" id="gPos"></div>
-          <button id="gOk" class="primary g-ok">확인</button>
+          <div class="g-btns"><button id="gBack" class="g-back">다른 샷 보기</button><button id="gOk" class="primary g-ok">치러 가기</button></div>
         </div>
         <!-- 큰 화면 조정 시트: 도구 막대의 "조정"을 누르면 펼침 -->
         <div id="adj" class="adj hidden" role="dialog" aria-label="샷 미세 조정">

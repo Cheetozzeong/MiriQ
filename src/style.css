@@ -501,3 +501,14 @@ body.portrait .guide { top: auto; bottom: 10px; transform: none; animation: gInB
 /* 큰 화면(회전) 모드 뒤집기: 휴대폰을 반대 방향으로 눕혔을 때 */
 body.rotated.rotated-ccw .layout { transform: translateY(100dvh) rotate(-90deg); }
 body.rotated .rail [data-only='rotated'] { display: flex; }
+
+/* "이걸로 칠게요" 버튼 + 결과 기록 대기 표시 */
+.hud-go { pointer-events: auto; align-self: flex-start; min-height: 0; height: 32px; padding: 0 12px; border-radius: 16px;
+  background: var(--accent); border: 0; color: #fff; font-weight: 700; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,.35); }
+.hud.folded .hud-go { height: 28px; font-size: 12px; }
+.pending-rec { position: absolute; left: 8px; bottom: 10px; z-index: 3; min-height: 0; height: 34px; padding: 0 14px; border-radius: 17px;
+  background: rgba(16,21,28,.92); border: 1px solid var(--ok); color: var(--ok); font-weight: 700; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,.35); }
+.g-btns { display: flex; gap: 6px; margin-top: 8px; }
+.g-btns button { flex: 1; min-height: 38px; margin: 0; }
+.g-back { font-size: 13px; }
+.card-go { margin-top: 6px; width: 100%; min-height: 36px; font-weight: 700; }
