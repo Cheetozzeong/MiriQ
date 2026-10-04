@@ -414,7 +414,7 @@ body.portrait .rec-status { margin: 4px 0; font-size: 12px; }
 .sys-help p { margin: 6px 0; }
 .sys-help ul { margin: 4px 0; padding-left: 18px; }
 .sys-help li { margin: 2px 0; }
-body.portrait .first-row .note, body.wide .first-row .note { display: none; }
+body.portrait .first-row .note:not(.opening), body.wide .first-row .note:not(.opening) { display: none; }
 body.portrait .first-row { margin: 0 0 4px; }
 
 /* 추천 탐색 중 — 테이블 위 로딩 표시 */
@@ -430,3 +430,6 @@ body.portrait .first-row { margin: 0 0 4px; }
 
 /* 숨김은 항상 우선 (개별 display 지정보다 강하게) */
 .hidden { display: none !important; }
+
+#firstSel button:disabled { opacity: .55; cursor: not-allowed; }
+#firstSel button.on:disabled { opacity: 1; }

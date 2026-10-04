@@ -21,7 +21,7 @@ const PRESETS: { name: string; layout: Layout }[] = [
   { name: '예시 C — 중앙 배치', layout: { white: { x: 1.2, y: 0.9 }, yellow: { x: 1.65, y: 0.65 }, red: { x: 0.3, y: 0.25 } } },
 ];
 let layout: Layout = clone(PRESETS[0].layout);
-let shot: Shot = { cue: 'white', angleDeg: 6, speed: 3.2, tipX: 0.3, tipY: 0.2, firstBall: 'red' }; // 기본 배치 = 초구
+let shot: Shot = { cue: 'white', angleDeg: 6, speed: 3.2, tipX: 0.3, tipY: 0.2 };
 let result: SimResult;
 let prob: number | null = null;
 let sysRes: SystemResult | null = null;
@@ -94,6 +94,7 @@ function recompute() {
   pending = true;
   requestAnimationFrame(() => {
     pending = false;
+    updateOpening();
     result = simulate(layout, shot, interacting ? { dt: 0.001, maxTime: 15 } : {});
     anim = null;
     if (!interacting) requestProb();
@@ -103,6 +104,23 @@ function recompute() {
     renderDispute();
     draw();
   });
+}
+
+// ───────── 초구 규칙 ─────────
+// 공이 초구 위치(빨간공 풋 스팟, 상대 공 헤드 스팟, 수구는 헤드 스트링 위 좌우 15.24cm)에 있으면
+// 자동으로 초구 규칙 적용: 1적구는 빨간공, 쿠션을 먼저 맞히면 파울. 공을 움직이면 자동 해제
+let openingForcedFirst = false;
+function isOpeningLayout() {
+  const near = (p: Pos, x: number, y: number) => Math.hypot(p.x - x, p.y - y) < 0.015;
+  const other: BallId = shot.cue === 'white' ? 'yellow' : 'white';
+  const head = DIAMOND * 2, foot = DIAMOND * 6, mid = TABLE.W / 2;
+  return near(layout.red, foot, mid) && near(layout[other], head, mid)
+    && (near(layout[shot.cue], head, mid - 0.1524) || near(layout[shot.cue], head, mid + 0.1524));
+}
+function updateOpening() {
+  shot.opening = isOpeningLayout();
+  if (shot.opening) { shot.firstBall = 'red'; openingForcedFirst = true; }
+  else if (openingForcedFirst) { shot.firstBall = undefined; openingForcedFirst = false; }
 }
 
 // ───────── 테이블 캔버스 ─────────
@@ -545,8 +563,7 @@ presetSel.addEventListener('change', () => {
   if (presetSel.value === 'rand') {
     for (const id of BALL_IDS) placeBall(id, { x: R + Math.random() * (TABLE.L - 2 * R), y: R + Math.random() * (TABLE.W - 2 * R) });
   } else layout = clone(PRESETS[+presetSel.value].layout);
-  // 초구는 반드시 빨간공을 1적구로
-  shot.firstBall = presetSel.value === '0' ? 'red' : undefined;
+  if (presetSel.value !== '0' && !openingForcedFirst) shot.firstBall = undefined;
   sysRes = null;
   recompute();
   layoutChanged();
@@ -631,13 +648,17 @@ function renderFirstSel() {
   const other = shot.cue === 'white' ? 'yellow' : 'white';
   const opts: [string, string][] = [['', '자동'], ['red', '빨간공'], [other, KO[other]]];
   const cur = shot.firstBall ?? '';
-  $('firstSel').innerHTML = opts.map(([v, t]) => `<button data-v="${v}" class="${v === cur ? 'on' : ''}">${t}</button>`).join('');
-  $('firstNote').textContent = shot.firstBall ? '이 공을 먼저 맞혀야 득점' : '어느 공이든 먼저';
+  $('firstSel').innerHTML = opts.map(([v, t]) => `<button data-v="${v}" class="${v === cur ? 'on' : ''}"${shot.opening ? ' disabled' : ''}>${t}</button>`).join('');
+  $('firstNote').innerHTML = shot.opening
+    ? '<b style="color:var(--warn)">초구 규칙</b> · 빨간공을 쿠션 없이 직접'
+    : shot.firstBall ? '이 공을 먼저 맞혀야 득점' : '어느 공이든 먼저';
+  $('firstNote').classList.toggle('opening', !!shot.opening);
 }
 $('firstSel').addEventListener('click', (ev) => {
   const b = (ev.target as HTMLElement).closest('button');
-  if (!b || dispute) return;
+  if (!b || dispute || shot.opening) return;
   shot.firstBall = (b.dataset.v || undefined) as BallId | undefined;
+  openingForcedFirst = false;
   renderFirstSel();
   recompute();
   layoutChanged();
@@ -746,6 +767,7 @@ function rankCandidates(list: Candidate[]) {
 async function recommend() {
   activeSearch?.cancel();
   const gen = ++searchGen;
+  updateOpening();
   const lay = clone(layout);
   const base = { ...shot };
   candidates = []; renderCands();
@@ -882,7 +904,7 @@ $('recOptBtn').addEventListener('click', () => {
   const open = recOpts.classList.toggle('collapsed') === false;
   $('recOptBtn').setAttribute('aria-expanded', String(open));
 });
-const prefsSummary = () => `${shot.firstBall ? `1적구 ${KO[shot.firstBall]} · ` : ''}${SKILL[prefs.skill as Skill].label} · 테이블 ${TABLE_SPEED[prefs.table as TableSpeed].label}${prefs.easyFirst ? ' · 쉬운 샷 우선' : ''}`;
+const prefsSummary = () => `${shot.opening ? '초구 규칙 · ' : shot.firstBall ? `1적구 ${KO[shot.firstBall]} · ` : ''}${SKILL[prefs.skill as Skill].label} · 테이블 ${TABLE_SPEED[prefs.table as TableSpeed].label}${prefs.easyFirst ? ' · 쉬운 샷 우선' : ''}`;
 
 // 설정: 실력 단계 · 테이블 상태 · 쉬운 샷 우선
 function bindSeg(id: string, key: 'skill' | 'table', after: () => void) {
