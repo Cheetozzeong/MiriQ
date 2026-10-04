@@ -61,5 +61,11 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
     ok[b] = b % 5 === 0 ? (status[b / 5] === 2 ? 1 : 0) : scanShot(layout, { ...shot, angleDeg: b * FINE }) === 2 ? 1 : 0;
     if (++i % 40 === 0) post({ kind: 'progress', id, value: 0.6 + (i / todo.size) * 0.4 });
   }
-  post({ kind: 'scan', id, ranges: findRanges(ok, FINE) });
+  // 각 구간이 공을 먼저 맞히는 샷인지(빈쿠션 아님) 분류 — 추천 순서에 사용
+  const ranges = findRanges(ok, FINE).map((g) => {
+    const r = simulate(layout, { ...shot, angleDeg: g.angleDeg }, { dt: 0.0015, maxTime: 14, record: false, stopWhenDecided: true });
+    const first = r.events.find((e) => e.ball === shot.cue || e.other === shot.cue);
+    return { ...g, direct: first?.type === 'ball' };
+  });
+  post({ kind: 'scan', id, ranges });
 };

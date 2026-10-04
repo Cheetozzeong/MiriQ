@@ -1,4 +1,4 @@
-export interface ScanRange { angleDeg: number; width: number }
+export interface ScanRange { angleDeg: number; width: number; direct?: boolean }
 
 // 연속 성공 각도 구간 → 후보 (구간이 넓을수록 실수에 관대). 360°→0° 이어지는 구간도 하나로 합침
 export function findRanges(ok: ArrayLike<number>, step: number): ScanRange[] {

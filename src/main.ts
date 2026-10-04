@@ -26,6 +26,7 @@ let result: SimResult;
 let prob: number | null = null;
 let sysRes: SystemResult | null = null;
 interface Candidate extends ScanRange {
+  direct?: boolean; // 탐색 단계에서 본 1차 분류: 공을 먼저 맞힘
   tipX: number; tipY: number; speed: number; prob: number; score: number;
   summary?: ShotSummary; diff?: Difficulty; pat?: { key: string; label: string }; pending?: boolean;
 }
@@ -238,7 +239,7 @@ function drawPrediction(showOthers: boolean) {
   let n = 0, contact = 0;
   const secondT = result.events.find((e) => e.type === 'ball' && (e.ball === shot.cue || e.other === shot.cue) && ballOf(e) === result.outcome.secondHit)?.t ?? Infinity;
   for (const e of result.events) {
-    if (e.type === 'cushion' && e.ball === shot.cue) {
+    if (e.type === 'cushion' && e.ball === shot.cue && e.counted !== false) {
       n++;
       if (n > 8) continue;
       const [x, y] = px(e);
@@ -248,16 +249,17 @@ function drawPrediction(showOthers: boolean) {
       ctx.fillStyle = '#111'; ctx.font = 'bold 10px sans-serif'; ctx.fillText(String(n), x, y + 0.5);
     }
     if (e.type === 'ball' && (e.ball === shot.cue || e.other === shot.cue)) {
-      contact++;
-      if (contact > 2) continue;
-      // 접촉 순간 수구 위치 (고스트볼)
+      // 1적 = 1적구에 처음 닿은 순간, 2적 = 2적구에 처음 닿은 순간 (1적구 되맞음은 표시하지 않음)
       const obj = ballOf(e)!;
+      const which = obj === result.outcome.firstHit && !(contact & 1) ? 1 : obj === result.outcome.secondHit && !(contact & 2) ? 2 : 0;
+      if (!which) continue;
+      contact |= which;
       const cuePt = nearestPathPoint(result.paths[shot.cue], e);
       const [x, y] = px(cuePt);
       ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.2; ctx.setLineDash([2, 2]);
       circle(x, y, R * S); ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = COLORS[obj]; ctx.font = 'bold 11px sans-serif';
-      ctx.fillText(contact === 1 ? '1적' : '2적', x, y - R * S - 9);
+      ctx.fillText(which === 1 ? '1적' : '2적', x, y - R * S - 9);
     }
   }
   // 정지 위치 (반투명)
@@ -653,7 +655,7 @@ function renderDetail() {
     </div>
     <p class="note">성공 확률 = ${SKILL[prefs.skill as Skill].label} 기준 스트로크 오차(방향 ±${SKILL[prefs.skill as Skill].angle}°, 힘 ±${Math.round(SKILL[prefs.skill as Skill].speed * 100)}%)로 40회 시뮬레이션</p>
     <ol class="events">${cueEvents.slice(0, 14).map((e) => `<li class="cue">${e.t.toFixed(2)}s · ${
-      e.type === 'cushion' ? `${WALL_KO[e.wall!]} (${posTxt(e)})` : `${KO[ballOf(e)!]} 접촉`
+      e.type === 'cushion' ? `${WALL_KO[e.wall!]} (${posTxt(e)})${e.counted === false ? ' · 쿠션 미인정(스침/레일 타기)' : ''}` : `${KO[ballOf(e)!]} 접촉`
     } · ${e.speed.toFixed(2)}m/s</li>`).join('')}</ol>`;
 }
 const posTxt = (p: Pos) => `${(p.x / DIAMOND).toFixed(1)}, ${(p.y / DIAMOND).toFixed(1)}`;
@@ -688,17 +690,23 @@ function setProgress(p: number | null, text = '') {
   $('recStatus').innerHTML = text;
 }
 
+// 순위: ① 공을 먼저 맞히는 샷(직접) → ② 빈쿠션은 직접 샷 다음에. 각 그룹 안에서는 점수(확률 − 난이도) 순,
+// 경로 형태별 대표를 먼저 골라 비슷한 샷만 나오지 않게 함
 function rankCandidates(list: Candidate[]) {
   const w = prefs.easyFirst ? 0.75 : 0.25;
   for (const c of list) c.score = c.prob * 100 - w * (c.diff?.score ?? 0);
-  list.sort((a, b) => b.score - a.score);
-  // 경로 형태별 최고 1개씩 먼저, 나머지는 점수 순
-  const picked: Candidate[] = [], seen = new Set<string>();
-  for (const c of list) if (c.pat && !seen.has(c.pat.key)) { seen.add(c.pat.key); picked.push(c); }
-  for (const c of list) if (!picked.includes(c)) picked.push(c);
-  // 성공 확률이 너무 낮은 후보는 다른 후보가 충분하면 제외
-  const good = picked.filter((c) => c.prob >= 0.05);
-  return (good.length >= 3 ? good : picked).slice(0, 6).sort((a, b) => b.score - a.score);
+  const pick = (group: Candidate[]) => {
+    group.sort((a, b) => b.score - a.score);
+    const out: Candidate[] = [], seen = new Set<string>();
+    for (const c of group) if (c.pat && !seen.has(c.pat.key)) { seen.add(c.pat.key); out.push(c); }
+    for (const c of group) if (!out.includes(c)) out.push(c);
+    return out.sort((a, b) => b.score - a.score);
+  };
+  const direct = pick(list.filter((c) => !c.summary?.cushionFirst));
+  const bank = pick(list.filter((c) => c.summary?.cushionFirst));
+  // 성공 확률 5% 미만은 사실상 치기 어려운 샷 → 직접·빈쿠션 모두 뒤로
+  const ok = (c: Candidate) => c.prob >= 0.05;
+  return [...direct.filter(ok), ...bank.filter(ok), ...direct.filter((c) => !ok(c)), ...bank.filter((c) => !ok(c))].slice(0, 6);
 }
 
 async function recommend() {
@@ -725,7 +733,9 @@ async function recommend() {
   activeSearch = scan;
   await scan.promise;
   if (gen !== searchGen) return;
-  const top = [...found].sort((a, b) => b.width - a.width).slice(0, 16);
+  // 확률 계산 대상: 공을 먼저 맞히는 후보 위주(최대 12개) + 빈쿠션 후보(최대 6개)
+  const byWidth = [...found].sort((a, b) => b.width - a.width);
+  const top = [...byWidth.filter((c) => c.direct).slice(0, 12), ...byWidth.filter((c) => !c.direct).slice(0, 6)];
   const err = SKILL[prefs.skill as Skill];
   const ev = runPool<Extract<WorkerResponse, { kind: 'eval' }>>(
     top.map((c) => ({ kind: 'eval', id: 0, layout: lay, shot: { ...base, ...c }, width: c.width, n: 30, err, table: prefs.table })),
@@ -737,7 +747,7 @@ async function recommend() {
   const scored: Candidate[] = [];
   top.forEach((c, i) => {
     const e = evals[i];
-    if (!e.verified) return; // 정밀 시뮬레이션에서 득점이 확인되지 않은 후보는 제외
+    if (!e.verified || !e.summary.scored) return; // 정밀 시뮬레이션에서 득점이 확인된 후보만 추천
     const shotC = { ...base, ...c, angleDeg: e.angleDeg };
     scored.push({ ...c, angleDeg: e.angleDeg, prob: e.prob, summary: e.summary, pending: false, score: 0,
       diff: difficulty(lay, shotC, e.summary), pat: pattern(e.summary) });
@@ -747,7 +757,7 @@ async function recommend() {
   renderCands();
   const sec = ((performance.now() - t0) / 1000).toFixed(1);
   setProgress(null, candidates.length
-    ? `득점 샷 ${candidates.length}개 · ${sec}초 <span class="rec-sum">(${prefsSummary()})</span>`
+    ? `득점 샷 ${candidates.length}개 (직접 ${candidates.filter((c) => !c.summary?.cushionFirst).length} · 빈쿠션 ${candidates.filter((c) => c.summary?.cushionFirst).length}) · ${sec}초 <span class="rec-sum">(${prefsSummary()})</span>`
     : `득점 경로를 찾지 못했습니다${recMode === 'fast' ? ' — <b>정밀</b> 모드로 다시 시도해 보세요' : ''}`);
   $('disputeBtn').classList.remove('hidden');
   if (candidates.length) applyCandidate(0);

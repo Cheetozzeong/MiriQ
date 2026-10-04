@@ -46,6 +46,7 @@ export interface SimEvent {
   x: number;
   y: number;
   speed: number;
+  counted?: boolean; // 수구 쿠션: 3쿠션 규칙상 쿠션 1회로 인정했는지
 }
 
 export interface Outcome {
@@ -210,9 +211,28 @@ export function simulate(layout: Layout, shot: Shot, opt: SimOptions = {}): SimR
     const isCueA = a.id === shot.cue, isCueB = b.id === shot.cue;
     if (!isCueA && !isCueB) { kiss = true; return; }
     const obj = isCueA ? b.id : a.id;
+    lastCueBall = { id: obj, t };
     if (!firstHit) firstHit = obj;
     else if (!secondHit && obj !== firstHit) { secondHit = obj; cushionsBeforeSecond = cushionCount; }
   };
+  // 3쿠션 규칙상 쿠션 1회로 인정할지:
+  //  - 아주 약한 스침(초속 3cm 미만) 제외
+  //  - 같은 쿠션을 0.12초 안에 다시 닿음(레일 타기) → 한 번으로
+  //  - 공과 부딪친 직후(10ms 이내, 그 공과 2cm 이내)에 생긴 쿠션 접촉 제외 — 1적구를 맞힌 것과 구분이 안 되는 동시 접촉
+  let lastCueBall: { id: BallId; t: number } | null = null;
+  let lastCueCushion: { wall: Wall; t: number } | null = null;
+  const countsAsCushion = (b: Ball, wall: Wall, t: number, speed: number) => {
+    if (speed < 0.03) return false;
+    if (lastCueCushion && lastCueCushion.wall === wall && t - lastCueCushion.t < 0.12) return false;
+    if (lastCueBall && t - lastCueBall.t < 0.01) {
+      const o = balls.find((x) => x.id === lastCueBall!.id)!;
+      if (Math.hypot(o.x - b.x, o.y - b.y) < 2 * R + 0.02) return false;
+    }
+    return true;
+  };
+  // 한 계산 구간 안에서 일어난 접촉들을 실제 시각 순으로 처리 (쿠션과 2적구 접촉 순서가 뒤바뀌지 않게)
+  type StepEv = { time: number; kind: 'cushion'; b: Ball; wall: Wall; speed: number } | { time: number; kind: 'ball'; a: Ball; b: Ball; speed: number };
+  const stepEvents: StepEv[] = [];
 
   let t = 0;
   let lastRec = 0, lastFrame = 0;
@@ -237,8 +257,7 @@ export function simulate(layout: Layout, shot: Shot, opt: SimOptions = {}): SimR
         b.x = Math.min(hiX, Math.max(lo, b.x));
         b.y = Math.min(hiY, Math.max(lo, b.y));
         if (speed > 0) {
-          events.push({ t, type: 'cushion', ball: b.id, wall, x: b.x, y: b.y, speed });
-          if (b.id === shot.cue && !secondHit) { cushionCount++; cueCushions.push(wall); }
+          stepEvents.push({ time: t - tau, kind: 'cushion', b, wall, speed });
           if (record) pushPath(b);
         }
       }
@@ -269,8 +288,20 @@ export function simulate(layout: Layout, shot: Shot, opt: SimOptions = {}): SimR
       }
       if (speed > 0) {
         if (record) { pushPath(a); pushPath(b); }
-        onBallContact(a, b, t, speed);
+        stepEvents.push({ time: t - tau, kind: 'ball', a, b, speed });
       }
+    }
+    if (stepEvents.length) {
+      stepEvents.sort((p, q) => p.time - q.time);
+      for (const e of stepEvents) {
+        if (e.kind === 'ball') { onBallContact(e.a, e.b, e.time, e.speed); continue; }
+        const isCue = e.b.id === shot.cue;
+        const counted = isCue && !secondHit && countsAsCushion(e.b, e.wall, e.time, e.speed);
+        events.push({ t: e.time, type: 'cushion', ball: e.b.id, wall: e.wall, x: e.b.x, y: e.b.y, speed: e.speed, counted: isCue && !secondHit ? counted : undefined });
+        if (counted) { cushionCount++; cueCushions.push(e.wall); }
+        if (isCue) lastCueCushion = { wall: e.wall, t: e.time }; // 레일을 타는 동안엔 계속 갱신 → 한 번으로 묶임
+      }
+      stepEvents.length = 0;
     }
     if (firstHit && !secondHit && cushionCount >= 3) {
       for (const o of balls) if (o !== cue && o.id !== firstHit) nearMiss = Math.min(nearMiss, Math.hypot(o.x - cue.x, o.y - cue.y) - 2 * R);

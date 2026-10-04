@@ -80,7 +80,7 @@ export function calibrate(layout: Layout, shot: Shot, seq: [Wall, Wall, Wall], a
   const target = railCoord(seq[2], railPoint(seq[2], arrivalDiamond));
   const err = (a: number): number => {
     const r = simulate(layout, { ...shot, angleDeg: a }, { dt: 0.001, maxTime: 10, record: false, only: [shot.cue] });
-    const cs = r.events.filter((e) => e.type === 'cushion').slice(0, 3);
+    const cs = r.events.filter((e) => e.type === 'cushion' && e.counted !== false).slice(0, 3);
     if (cs.length < 3 || cs.some((e, i) => e.wall !== seq[i])) return NaN;
     return railCoord(seq[2], cs[2]) - target;
   };
