@@ -856,6 +856,7 @@ $('easyFirst').addEventListener('change', () => {
 
 // ───────── 재생 ─────────
 function startAnim() {
+  if (isPortrait()) setSheet('min'); // 재생할 땐 시트를 최소로 접어 테이블 전체를 보여줌
   anim = { start: performance.now(), rate: ($('slow') as HTMLInputElement).checked ? 0.5 : 1 };
   draw();
 }
@@ -1032,14 +1033,31 @@ function renderQueueNote() {
 
 // ───────── 와이드 모드: 도구 막대 · 서랍 · 테이블 위 정보 ─────────
 const railBtn = (act: string) => document.querySelector<HTMLButtonElement>(`#rail [data-act="${act}"]`)!;
+// 세로 휴대폰 하단 시트 3단계: min(탭만 · 테이블 최대) / mid(첫 추천 카드까지) / full(화면 대부분)
+type SheetState = 'min' | 'mid' | 'full';
+let sheetState: SheetState = 'mid';
+const isPortrait = () => document.body.classList.contains('portrait');
+function setSheet(st: SheetState) {
+  const prev = sheetState;
+  sheetState = st;
+  const b = document.body.classList;
+  b.toggle('sheet-min', st === 'min');
+  b.toggle('drawer-open', st === 'full');
+  b.toggle('sheet-half', st === 'full' && activeTab === 2);
+  // min ↔ mid 는 테이블 영역 높이가 바뀌므로 다시 맞춤
+  if (isPortrait() && (prev === 'min') !== (st === 'min')) { lastBox = ''; resize(); }
+}
 function openDrawer() {
+  if (isPortrait()) { setSheet('full'); return; }
   document.body.classList.add('drawer-open');
   document.body.classList.toggle('sheet-half', activeTab === 2);
   railBtn('rec').classList.toggle('on', activeTab === 0);
   railBtn('shot').classList.toggle('on', activeTab === 2 && !dispute);
   railBtn('dispute').classList.toggle('on', activeTab === 2 && !!dispute);
 }
+// 닫기: 세로 시트는 full → mid (테이블 경로가 보이게), 와이드 서랍은 닫음
 function closeDrawer() {
+  if (isPortrait()) { if (sheetState === 'full') setSheet('mid'); return; }
   document.body.classList.remove('drawer-open');
   document.querySelectorAll('#rail button').forEach((b) => b.classList.remove('on'));
 }
@@ -1047,16 +1065,20 @@ const drawerOpen = () => document.body.classList.contains('drawer-open');
 // 와이드(서랍) 또는 세로 휴대폰(하단 시트): 패널을 펼치고 접는 구조
 const sheetLayout = () => document.body.classList.contains('wide') || document.body.classList.contains('portrait');
 
-// 하단 시트 손잡이: 탭하면 펼침/접힘, 위아래로 밀어서도 조작
+// 하단 시트 손잡이: 위로 밀면 한 단계 펼침, 아래로 밀면 한 단계 접힘 (크게 밀면 두 단계), 탭하면 min→mid→full→mid
 {
   const handle = $('sheetHandle');
+  const order: SheetState[] = ['min', 'mid', 'full'];
   let y0: number | null = null;
   handle.addEventListener('pointerdown', (ev) => { y0 = ev.clientY; handle.setPointerCapture(ev.pointerId); });
   handle.addEventListener('pointerup', (ev) => {
     if (y0 === null) return;
     const dy = ev.clientY - y0;
     y0 = null;
-    if (dy < -25) openDrawer(); else if (dy > 25) closeDrawer(); else if (drawerOpen()) closeDrawer(); else openDrawer();
+    const i = order.indexOf(sheetState);
+    if (Math.abs(dy) < 20) { setSheet(sheetState === 'full' ? 'mid' : order[i + 1]); return; }
+    const steps = Math.abs(dy) > innerHeight * 0.3 ? 2 : 1;
+    setSheet(order[Math.max(0, Math.min(2, i + (dy < 0 ? steps : -steps)))]);
   });
   handle.addEventListener('pointercancel', () => { y0 = null; });
 }
@@ -1249,6 +1271,7 @@ function applyMode() {
   document.body.classList.toggle('rotated', rotated);
   document.body.classList.toggle('wide', wide);
   document.body.classList.toggle('portrait', !wide && mobileMq.matches && portraitMq.matches);
+  if (!document.body.classList.contains('portrait')) { document.body.classList.remove('sheet-min'); sheetState = 'mid'; }
   wideBtn.setAttribute('aria-pressed', String(wideMode));
   wideBtn.textContent = wideMode ? '↩ 기본' : '⤢ 크게';
   wideBtn.hidden = !mobileMq.matches || (!portraitMq.matches && !wideMode);

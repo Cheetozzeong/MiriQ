@@ -330,6 +330,9 @@ body.portrait .sheet {
   transition: height .22s ease; padding-bottom: env(safe-area-inset-bottom);
 }
 body.portrait.drawer-open .sheet { height: 82dvh; }
+/* 최소: 손잡이 + 탭만 — 테이블 영역이 그만큼 커짐 */
+body.portrait.sheet-min { --peek: calc(66px + env(safe-area-inset-bottom)); }
+body.portrait.sheet-min .panel { visibility: hidden; }
 /* 조정 탭·이의제기: 테이블에서 경로 변화를 보면서 조작하도록 절반만 */
 body.portrait.drawer-open.sheet-half .sheet { height: 54dvh; }
 body.portrait .sheet-handle { display: flex; justify-content: center; align-items: center; height: 22px; flex: none; cursor: grab; touch-action: none; }
