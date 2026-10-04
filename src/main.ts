@@ -921,7 +921,7 @@ function layoutChanged() {
   updateOpening(); // 초구 여부(→ 1적구 자동 지정/해제)를 배치 기준으로 바로 반영
   hideAfterShot();
   hideGuide();
-  $('pendingRec').classList.add('hidden');
+  setShooting(false);
   activeSearch?.cancel(); searchGen++;
   $('disputeBtn').classList.add('hidden');
   candidates = []; pool = []; lastApplied = -1; renderCands();
@@ -1512,8 +1512,14 @@ function goShoot() {
 $('hudGo').addEventListener('click', goShoot);
 $('gBack').addEventListener('click', hideGuide);
 // 치러 가기: 안내를 닫고, 치고 돌아와 바로 결과를 기록할 수 있게 작은 표시를 남김
-$('gOk').addEventListener('click', () => { hideGuide(); $('pendingRec').classList.remove('hidden'); });
-$('pendingRec').addEventListener('click', () => { $('pendingRec').classList.add('hidden'); showAfterShot(); });
+// 치러 가는 동안: 테이블 위 배너(판정·추천 표시)는 잠시 접고, 결과 기록 표시만 남김 (설정은 바꾸지 않음)
+function setShooting(on: boolean) {
+  document.body.classList.toggle('shooting', on);
+  $('hud').classList.toggle('folded', on || hudFolded);
+  $('pendingRec').classList.toggle('hidden', !on);
+}
+$('gOk').addEventListener('click', () => { hideGuide(); setShooting(true); });
+$('pendingRec').addEventListener('click', () => { setShooting(false); showAfterShot(); });
 
 // ───────── 큰 화면 조정 시트: 방향(±·문지르기)·힘 ─────────
 function syncAdj() {
@@ -1541,7 +1547,7 @@ function toast(msg: string, ms = 2600) {
 }
 function showAfterShot() {
   if (dispute || !result) return;
-  $('pendingRec').classList.add('hidden');
+  setShooting(false); // 결과를 묻는 순간 배너·버튼 원래대로
   const o = result.outcome;
   $('asTitle').textContent = '실제로 쳐 보셨나요? 결과는?';
   $('asRun').textContent = runCount ? `연속 득점 ${runCount}점` : '';

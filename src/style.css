@@ -512,3 +512,6 @@ body.rotated .rail [data-only='rotated'] { display: flex; }
 .g-btns button { flex: 1; min-height: 38px; margin: 0; }
 .g-back { font-size: 13px; }
 .card-go { margin-top: 6px; width: 100%; min-height: 36px; font-weight: 700; }
+
+/* 치러 가는 동안: "이걸로 칠게요" 버튼 숨김 (결과 기록 표시만) */
+body.shooting .hud-go { display: none; }
