@@ -251,9 +251,12 @@ export function initPhoto(onApply: (l: Layout) => void) {
       cctx.strokeStyle = '#fff'; cctx.lineWidth = 2; cctx.beginPath(); cctx.arc(cxp, cyp, r, 0, Math.PI * 2); cctx.stroke();
     }
   }
+  // 포인터 → 캔버스 좌표. 큰 화면(회전) 모드에서는 화면 전체가 시계 방향 90° 돌아가 있으므로 역변환
   const local = (c: HTMLCanvasElement, ev: PointerEvent): Pos => {
     const r = c.getBoundingClientRect();
-    return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+    return document.body.classList.contains('rotated')
+      ? { x: ev.clientY - r.top, y: r.right - ev.clientX }
+      : { x: ev.clientX - r.left, y: ev.clientY - r.top };
   };
   cc.addEventListener('pointerdown', (ev) => {
     const p = local(cc, ev);

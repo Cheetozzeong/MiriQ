@@ -7,7 +7,7 @@ import { calibrate, railPoint, solveSystem, type SystemResult } from './systems'
 import type { ScanRange } from './ranges';
 import { runJob, type ShotSummary, type WorkerRequest, type WorkerResponse } from './jobs';
 import { initPhoto } from './photo';
-import { LEVEL_KO, difficulty, howTo, pattern, powerLevel, thicknessText, tipClock, type Difficulty } from './analysis';
+import { LEVEL_KO, POWER_KO, difficulty, howTo, pattern, powerLevel, summarize, thicknessText, tipClock, type Difficulty } from './analysis';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const R = BALL.R;
@@ -383,7 +383,7 @@ function drawAnim(showOthers: boolean) {
   const t = ((performance.now() - anim!.start) / 1000) * anim!.rate;
   const fr = result.frames;
   let k = fr.findIndex((f) => f.t > t);
-  if (k < 0) { k = fr.length - 1; anim = null; }
+  if (k < 0) { k = fr.length - 1; anim = null; showAfterShot(); }
   BALL_IDS.forEach((id, i) => {
     if (id !== shot.cue && !showOthers) return;
     ctx.strokeStyle = id === shot.cue ? 'rgba(255,255,255,0.85)' : hexA(COLORS[id], 0.6);
@@ -462,7 +462,7 @@ function localXY(el: Element, ev: PointerEvent): [number, number] {
 }
 const screenPos = (ev: PointerEvent) => localXY(cv, ev);
 cv.addEventListener('pointerdown', (ev) => {
-  if (anim) { anim = null; draw(); }
+  if (anim) { anim = null; clearTimeout(animTimer); draw(); }
   const [sx, sy] = screenPos(ev);
   const p = toTable(sx, sy);
   if (placeMode && !dispute) {
@@ -637,7 +637,7 @@ coordBody.querySelectorAll('input').forEach((inp) => inp.addEventListener('chang
 // ───────── 패널: 샷 설정 ─────────
 const angleIn = $<HTMLInputElement>('angle');
 angleIn.addEventListener('change', () => { shot.angleDeg = norm(parseFloat(angleIn.value) || 0); recompute(); });
-document.querySelectorAll<HTMLButtonElement>('[data-da]').forEach((b) => b.addEventListener('click', () => {
+document.querySelectorAll<HTMLButtonElement>('#panel [data-da]').forEach((b) => b.addEventListener('click', () => {
   shot.angleDeg = norm(shot.angleDeg + parseFloat(b.dataset.da!)); recompute();
 }));
 const speedIn = $<HTMLInputElement>('speed');
@@ -783,7 +783,7 @@ let activeSearch: { cancel(): void } | null = null;
 
 // 사용자 설정 (이 기기에 저장)
 const prefs = (() => {
-  const def = { skill: 'intermediate' as Skill, table: 'normal' as TableSpeed, easyFirst: true, priority: 'score' as Priority };
+  const def = { skill: 'intermediate' as Skill, table: 'normal' as TableSpeed, easyFirst: true, priority: 'score' as Priority, bigMode: true };
   try { return { ...def, ...JSON.parse(localStorage.getItem('miriq.prefs') || '{}') }; } catch { return def; }
 })();
 const savePrefs = () => { try { localStorage.setItem('miriq.prefs', JSON.stringify(prefs)); } catch { /* 저장 불가 */ } };
@@ -910,24 +910,32 @@ async function recommend() {
 
 let recTimer = 0;
 function layoutChanged() {
+  hideAfterShot();
+  hideGuide();
   activeSearch?.cancel(); searchGen++;
   $('disputeBtn').classList.add('hidden');
   candidates = []; pool = []; lastApplied = -1; renderCands();
   clearTimeout(recTimer);
   saveHistory();
-  if (!($('autoRec') as HTMLInputElement).checked) { setProgress(null, '배치가 바뀌었습니다. <b>추천 받기</b>를 눌러 주세요.'); return; }
+  if (!($('autoRec') as HTMLInputElement).checked) {
+    setProgress(null, '배치가 바뀌었습니다. <b>추천 받기</b>를 눌러 주세요.');
+    guideSoon();
+    return;
+  }
   setProgress(null, '배치 변경 — 곧 추천을 시작합니다');
   setTableLoading('배치 변경 확인 — 추천 경로 찾는 중…', 0);
   recTimer = window.setTimeout(recommend, 450);
 }
 
 let lastApplied = -1; // 마지막으로 적용한 추천 (이의제기 대상 기본값)
-function applyCandidate(i: number) {
+function applyCandidate(i: number, guide = true) {
   const c = candidates[i];
   lastApplied = i;
   Object.assign(shot, { angleDeg: c.angleDeg, speed: c.speed, tipX: c.tipX, tipY: c.tipY });
   sysRes = null;
   recompute();
+  // 추천이 정해지거나 바뀌면 "어떻게 쳐야 하는지" 카드를 자동으로 (계산이 반영된 다음 프레임에)
+  if (guide) guideSoon();
 }
 const currentCand = () => candidates.findIndex((c) =>
   c.angleDeg === shot.angleDeg && c.speed === shot.speed && c.tipX === shot.tipX && c.tipY === shot.tipY);
@@ -1037,9 +1045,15 @@ $('easyFirst').addEventListener('change', () => {
 });
 
 // ───────── 재생 ─────────
+let animTimer = 0;
 function startAnim() {
   if (isPortrait()) setSheet('min'); // 재생할 땐 시트를 최소로 접어 테이블 전체를 보여줌
+  hideGuide(); hideAfterShot(); hideAdj();
   anim = { start: performance.now(), rate: ($('slow') as HTMLInputElement).checked ? 0.5 : 1 };
+  // 화면 갱신이 멈춰도(백그라운드 등) 재생 시간이 지나면 끝난 것으로 처리
+  const a0 = anim;
+  clearTimeout(animTimer);
+  animTimer = window.setTimeout(() => { if (anim === a0) { anim = null; draw(); showAfterShot(); } }, (result.duration / a0.rate) * 1000 + 300);
   draw();
 }
 $('play').addEventListener('click', startAnim);
@@ -1269,6 +1283,8 @@ document.querySelectorAll<HTMLButtonElement>('#rail button').forEach((b) => b.ad
   const act = b.dataset.act;
   if (act === 'play') { closeDrawer(); startAnim(); return; }
   if (act === 'lock') { $('lock').click(); return; }
+  if (act === 'adjust') { closeDrawer(); if ($('adj').classList.contains('hidden')) showAdj(); else hideAdj(); return; }
+  if (act === 'photo') { closeDrawer(); hideAdj(); $('photoBtn').click(); return; }
   if (act === 'wide') { wideBtn.click(); return; }
   if (act === 'exit') { wideBtn.click(); return; }
   if (act === 'dispute') {
@@ -1414,17 +1430,129 @@ function renderStats() {
   const by = (lv: string) => { const a = recs.filter((r) => r.level === lv); return a.length ? ` · ${LEVEL_KO[lv as 'easy']} ${a.filter((r) => r.result === 'scored').length}/${a.length}` : ''; };
   $('statsNote').textContent = `내 기록: ${recs.length}회 중 ${ok}회 득점 (${Math.round((ok / recs.length) * 100)}%)${by('easy')}${by('normal')}${by('hard')}`;
 }
-$('logBox').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
+function addRecord(res: 'scored' | 'missed') {
   const i = currentCand();
-  if (i < 0) return;
-  const c = candidates[i];
+  const c = i >= 0 ? candidates[i] : null;
   const recs = loadRecords();
-  recs.push({ ts: new Date().toISOString(), layout: clone(layout), shot: { ...shot }, rank: i, level: c.diff?.level, prob: c.prob, result: b.dataset.r as 'scored' | 'missed', skill: prefs.skill });
+  recs.push({ ts: new Date().toISOString(), layout: clone(layout), shot: { ...shot }, rank: i, level: c?.diff?.level, prob: c?.prob ?? prob ?? 0, result: res, skill: prefs.skill });
   try { localStorage.setItem(RECORDS_KEY, JSON.stringify(recs.slice(-500))); } catch { /* 저장 불가 */ }
+  renderStats();
+}
+$('logBox').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
+  if (currentCand() < 0) return;
+  addRecord(b.dataset.r as 'scored' | 'missed');
+  runCount = b.dataset.r === 'scored' ? runCount + 1 : 0;
   $('logMsg').textContent = b.dataset.r === 'scored' ? '기록했습니다 👏' : '기록했습니다';
   setTimeout(() => { $('logMsg').textContent = ''; }, 1500);
-  renderStats();
 }));
+
+// ───────── 샷 안내 카드: 어떻게 쳐야 하는지 자동으로 잠깐 보여주기 ─────────
+function showGuide() {
+  // 이의제기·재생 중이거나 조정 시트·결과 카드가 떠 있으면 겹치지 않게 생략
+  if (dispute || anim || !result || !$('adj').classList.contains('hidden') || !$('afterShot').classList.contains('hidden')) return;
+  const i = currentCand();
+  const c = i >= 0 ? candidates[i] : null;
+  const s = c?.summary ?? summarize(layout, shot); // 추천이 아니면 지금 샷을 바로 분석
+  const h = howTo(shot, s);
+  $('gTitle').textContent = c ? `추천 ${i + 1}/${candidates.length} · ${c.pat?.label ?? ''}` : '현재 샷';
+  $('gLevel').innerHTML = c?.diff ? `<span class="lv lv-${c.diff.level}">${LEVEL_KO[c.diff.level]}</span>` : '';
+  $('gAim').textContent = h.aim || `방향 ${shot.angleDeg.toFixed(1)}°`;
+  $('gTipTxt').textContent = h.tip;
+  const p = powerLevel(shot.speed);
+  $('gPow').textContent = `${p}/5 ${POWER_KO[p]}`;
+  $('gPowBar').innerHTML = [1, 2, 3, 4, 5].map((k) => `<i class="${k <= p ? 'on' : ''}"></i>`).join('');
+  const tx = 32 + shot.tipX * 26, ty = 32 - shot.tipY * 26;
+  $('gTip').innerHTML = `<circle cx="32" cy="32" r="28" fill="#e9e6dc"/><circle cx="32" cy="32" r="16.8" fill="none" stroke="rgba(0,0,0,.18)"/>
+    <line x1="4" y1="32" x2="60" y2="32" stroke="rgba(0,0,0,.18)"/><line x1="32" y1="4" x2="32" y2="60" stroke="rgba(0,0,0,.18)"/>
+    <circle cx="${tx}" cy="${ty}" r="5" fill="#1f6fd1" stroke="#fff" stroke-width="1.5"/>`;
+  $('gRoute').innerHTML = s.firstHit
+    ? `${KO[s.firstHit]} → ${s.cushions.map((w) => WALL_SHORT[w]).join('·') || '—'} → ${s.secondHit ? KO[s.secondHit] : '—'} ${result.outcome.scored ? '<b style="color:var(--ok)">득점</b>' : '<b style="color:var(--fail)">실패</b>'}${c ? ` · 성공 ${Math.round(c.prob * 100)}%` : ''}`
+    : `<span style="color:var(--fail)">${result.outcome.reason}</span>`;
+  $('gPos').textContent = BALL_IDS.map((id) => `${KO[id]} ${(layout[id].x / DIAMOND).toFixed(1)},${(layout[id].y / DIAMOND).toFixed(1)}`).join(' · ') + ' (포인트)';
+  $('guide').classList.remove('hidden');
+}
+function hideGuide() { $('guide').classList.add('hidden'); }
+$('gOk').addEventListener('click', hideGuide);
+$('hudRecTxt').addEventListener('click', () => showGuide()); // 테이블 위 추천 표시를 누르면 다시 보기
+const guideSoon = () => requestAnimationFrame(() => requestAnimationFrame(() => showGuide()));
+
+// ───────── 큰 화면 조정 시트: 방향(±·문지르기)·힘 ─────────
+function syncAdj() {
+  $('adjAngle').textContent = `${shot.angleDeg.toFixed(1)}°`;
+  ($('adjSpeed') as HTMLInputElement).value = String(shot.speed);
+  $('adjSpeedTxt').textContent = `${powerLevel(shot.speed)}/5`;
+}
+function showAdj() { hideGuide(); syncAdj(); $('adj').classList.remove('hidden'); }
+function hideAdj() { $('adj').classList.add('hidden'); }
+$('adjClose').addEventListener('click', hideAdj);
+$('adj').querySelectorAll<HTMLButtonElement>('[data-da]').forEach((b) => b.addEventListener('click', () => {
+  shot.angleDeg = norm(shot.angleDeg + parseFloat(b.dataset.da!)); sysRes = null; recompute(); syncAdj();
+}));
+$('adjSpeed').addEventListener('input', () => { shot.speed = parseFloat(($('adjSpeed') as HTMLInputElement).value); interacting = true; recompute(); syncAdj(); });
+$('adjSpeed').addEventListener('change', () => { interacting = false; recompute(); });
+bindJog($('adjJog'), $('adjJogTxt'), 0, '◀ 문질러서 미세 조정 ▶');
+
+// ───────── 재생 후 "성공하셨나요?" → 기록 + 뒷공으로 이어가기 ─────────
+let runCount = 0; // 이번에 이어서 친 연속 득점
+function toast(msg: string, ms = 2600) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), ms);
+}
+function showAfterShot() {
+  if (dispute || !result) return;
+  const o = result.outcome;
+  $('asTitle').textContent = '실제로 쳐 보셨나요? 결과는?';
+  $('asRun').textContent = runCount ? `연속 득점 ${runCount}점` : '';
+  $('asSub').textContent = o.scored
+    ? '예상: 득점 — 득점했다면 시뮬레이션에서 공이 멈춘 자리로 뒷공을 이어서 추천해 드려요'
+    : `예상: 실패 (${o.reason})`;
+  $('asMain').classList.remove('hidden');
+  $('asMissOpts').classList.add('hidden');
+  $('afterShot').classList.remove('hidden');
+}
+const hideAfterShot = () => $('afterShot').classList.add('hidden');
+// 시뮬레이션에서 공이 멈춘 자리 → 다음 배치 (수구는 그대로, 득점했으니 계속 침)
+function loadNextLayout(cue: BallId) {
+  const next = result.final;
+  layout = clone(next);
+  BALL_IDS.forEach((id) => placeBall(id, next[id]));
+  shot.cue = cue;
+  if (shot.firstBall === cue) shot.firstBall = undefined;
+  sysRes = null;
+  recompute();
+  layoutChanged();
+}
+$('asClose').addEventListener('click', hideAfterShot);
+$('afterShot').addEventListener('click', (ev) => {
+  const a = (ev.target as HTMLElement).closest('button')?.dataset.a;
+  if (!a) return;
+  if (a === 'cont' || a === 'adjust') {
+    addRecord('scored');
+    runCount++;
+    hideAfterShot();
+    loadNextLayout(shot.cue);
+    if (a === 'adjust') { selectTab(1); toast('예상 배치를 불러왔어요. 실제 위치와 다른 공을 끌어서 맞춰 주세요'); }
+    else toast(`뒷공 배치로 이어갑니다 (연속 ${runCount}점) — 실제와 다르면 공을 끌어서 맞춰 주세요`);
+  } else if (a === 'miss') {
+    addRecord('missed');
+    runCount = 0;
+    $('asTitle').textContent = '기록했어요. 다음은?';
+    $('asSub').textContent = '실제로 멈춘 위치는 시뮬레이션과 다를 수 있어요';
+    $('asRun').textContent = '';
+    $('asMain').classList.add('hidden');
+    $('asMissOpts').classList.remove('hidden');
+  } else if (a === 'opp') {
+    // 상대 차례: 상대 수구로 바꾸고, 실제 멈춘 위치로 공을 맞추도록 배치 탭 열기
+    hideAfterShot();
+    loadNextLayout(shot.cue === 'white' ? 'yellow' : 'white');
+    selectTab(1);
+    toast('상대 차례예요. 실제로 멈춘 위치로 공을 맞춰 주세요 (사진 입력도 가능)');
+  } else if (a === 'retry') {
+    hideAfterShot();
+  }
+});
 
 // ───────── 시작 ─────────
 // ───────── 모바일 탭 ─────────
@@ -1470,6 +1598,7 @@ function applyMode() {
 const nativeApp = (window as unknown as { MiriQApp?: { setOrientation(mode: string): void } }).MiriQApp;
 wideBtn.addEventListener('click', async () => {
   wideMode = !wideMode;
+  prefs.bigMode = wideMode; savePrefs(); // 큰 화면 / 축소 선택 기억
   if (nativeApp) { nativeApp.setOrientation(wideMode ? 'landscape' : 'auto'); applyMode(); return; }
   // 안드로이드 등 지원 기기: 전체화면 + 가로 고정으로 진짜 회전. 미지원(iOS)이면 CSS 회전으로 대체
   try {
@@ -1487,6 +1616,9 @@ document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement && wideMode && !portraitMq.matches) { wideMode = false; applyMode(); }
 });
 [mobileMq, landscapeMq, portraitMq].forEach((mq) => mq.addEventListener('change', applyMode));
+// 휴대폰은 큰 화면(가로)이 기본 — "축소"를 누른 적이 있으면 그 선택을 따름
+wideMode = mobileMq.matches && prefs.bigMode !== false;
+if (wideMode && nativeApp) nativeApp.setOrientation('landscape');
 applyMode();
 addEventListener('resize', resize);
 // 사진으로 배치 입력 → 적용하면 바로 추천

@@ -29,6 +29,47 @@
           </div>
           <button id="hudMini" class="hud-mini" aria-label="추천 정보 펼치기"></button>
         </div>
+        <!-- 샷 안내 카드: 추천이 정해지거나 바뀌면 자동으로 나옴, 확인 누르면 들어감 -->
+        <div id="guide" class="guide hidden" role="dialog" aria-label="샷 안내">
+          <div class="g-head"><b id="gTitle">이렇게 치세요</b><span id="gLevel"></span></div>
+          <div class="g-body">
+            <svg id="gTip" class="g-tip" viewBox="0 0 64 64" aria-hidden="true"></svg>
+            <div class="g-lines">
+              <div><span class="g-k">겨냥</span><b id="gAim"></b></div>
+              <div><span class="g-k">당점</span><b id="gTipTxt"></b></div>
+              <div><span class="g-k">힘</span><b id="gPow"></b><span class="g-pow" id="gPowBar"></span></div>
+            </div>
+          </div>
+          <div class="g-route" id="gRoute"></div>
+          <div class="g-pos" id="gPos"></div>
+          <button id="gOk" class="primary g-ok">확인</button>
+        </div>
+        <!-- 큰 화면 조정 시트: 도구 막대의 "조정"을 누르면 펼침 -->
+        <div id="adj" class="adj hidden" role="dialog" aria-label="샷 미세 조정">
+          <div class="adj-head"><b>샷 조정</b><button id="adjClose" aria-label="닫기">✕</button></div>
+          <div class="adj-row"><span class="g-k">방향</span>
+            <button data-da="-1">−1°</button><button data-da="-0.1">−.1</button>
+            <b id="adjAngle" class="adj-val"></b>
+            <button data-da="0.1">+.1</button><button data-da="1">+1°</button>
+          </div>
+          <div id="adjJog" class="jog adj-jog"><span id="adjJogTxt">◀ 문질러서 미세 조정 ▶</span></div>
+          <div class="adj-row"><span class="g-k">힘</span><input type="range" id="adjSpeed" min="0.5" max="6" step="0.05" /><b id="adjSpeedTxt" class="adj-val"></b></div>
+          <p class="note">당점은 아래 "③ 조정" 탭의 공 그림에서 바꿀 수 있어요</p>
+        </div>
+        <!-- 시뮬레이션 재생 후: 실제로 쳐 본 결과 묻기 → 득점이면 뒷공으로 이어가기 -->
+        <div id="afterShot" class="after-shot hidden" role="dialog" aria-label="샷 결과 기록">
+          <div class="as-head"><b id="asTitle">성공하셨나요?</b><span id="asRun" class="as-run"></span><button id="asClose" aria-label="닫기">✕</button></div>
+          <div class="as-sub" id="asSub"></div>
+          <div class="as-btns" id="asMain">
+            <button data-a="cont" class="as-ok">✓ 득점 · 비슷하게 멈춤<br><small>뒷공 바로 추천</small></button>
+            <button data-a="adjust" class="as-ok2">✓ 득점 · 배치가 달라요<br><small>공 위치 맞추기</small></button>
+            <button data-a="miss" class="as-miss">✗ 실패했어요</button>
+          </div>
+          <div class="as-btns hidden" id="asMissOpts">
+            <button data-a="opp">상대 차례로 넘기기<br><small>수구 바꾸고 배치 맞추기</small></button>
+            <button data-a="retry">같은 배치로 다시</button>
+          </div>
+        </div>
         <!-- 추천 탐색 중 표시 (모든 화면) -->
         <div id="tableLoading" class="table-loading hidden" role="status" aria-live="polite">
           <span class="spin"></span><span id="tlText">추천 경로 찾는 중…</span>
@@ -55,8 +96,11 @@
       <button data-act="lock" data-only="portrait" title="공 배치 고정"><span class="ico">🔓</span><span>배치</span></button>
       <button data-act="wide" data-only="portrait" title="가로로 크게 보기"><span class="ico">⤢</span><span>크게</span></button>
       <button data-act="dispute" title="이의제기"><span class="ico">⚑</span><span>이의</span></button>
-      <div id="railJog" class="rail-jog" title="위아래로 드래그해서 방향 미세 조정"><span id="railJogTxt">미세<br />조정</span></div>
-      <button data-act="exit" data-only="wide" title="기본 화면으로"><span class="ico">↩</span><span>나가기</span></button>
+      <button data-act="adjust" title="방향·힘 미세 조정"><span class="ico">⚙</span><span>조정</span></button>
+      <button data-act="photo" title="사진으로 배치 입력"><span class="ico">📷</span><span>촬영</span></button>
+      <div id="railJog" class="rail-jog hidden"><span id="railJogTxt"></span></div>
+      <div class="rail-gap"></div>
+      <button data-act="exit" data-only="wide" title="일반 화면으로 축소"><span class="ico">⤡</span><span>축소</span></button>
     </nav>
 
     <div class="sheet" id="sheet">

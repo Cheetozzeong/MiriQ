@@ -443,3 +443,58 @@ body.portrait #prioSel, body.wide #prioSel { height: 40px; min-height: 40px; fon
 .metric .m-bar > i { display: block; height: 100%; }
 .metric.prio { color: var(--text); font-weight: 600; }
 .metric .wait { opacity: .6; }
+
+/* 재생 후 결과 묻기 카드 */
+.after-shot { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 4; width: min(440px, calc(100% - 20px));
+  background: rgba(16, 21, 28, .95); border: 1px solid rgba(63,167,255,.55); border-radius: 14px; padding: 10px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.as-head { display: flex; align-items: center; gap: 8px; }
+.as-head b { font-size: 15px; }
+.as-run { font-size: 12px; color: var(--warn); font-weight: 700; }
+.as-head button { margin-left: auto; width: 32px; height: 32px; min-height: 0; padding: 0; }
+.as-sub { font-size: 12.5px; color: var(--muted); margin: 4px 0 8px; }
+.as-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.as-btns button { min-height: 48px; padding: 6px 8px; font-size: 13.5px; line-height: 1.25; }
+.as-btns small { color: var(--muted); font-size: 11.5px; }
+.as-ok { border-color: var(--ok) !important; }
+.as-ok2 { border-color: #3a7d55 !important; }
+.as-miss { grid-column: 1 / -1; border-color: var(--fail) !important; color: var(--fail); }
+.toast { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 60; background: rgba(16,21,28,.95); border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 14px; font-size: 13px; max-width: calc(100% - 24px); box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+
+/* 샷 안내 카드 (오른쪽에서 잠깐 나옴) */
+.guide { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); z-index: 4; width: min(270px, calc(100% - 16px));
+  background: rgba(16, 21, 28, .95); border: 1px solid rgba(245,185,66,.6); border-radius: 14px; padding: 10px 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5); animation: gIn .22s ease; }
+@keyframes gIn { from { opacity: 0; transform: translate(24px, -50%); } to { opacity: 1; transform: translate(0, -50%); } }
+.g-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.g-head b { font-size: 14px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.g-body { display: flex; gap: 10px; align-items: center; }
+.g-tip { width: 64px; height: 64px; flex: none; }
+.g-lines { display: flex; flex-direction: column; gap: 3px; font-size: 13px; min-width: 0; }
+.g-lines b { font-weight: 700; }
+.g-k { display: inline-block; width: 30px; color: var(--muted); font-size: 12px; flex: none; }
+.g-pow { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: 1px; }
+.g-pow i { width: 7px; height: 9px; border-radius: 2px; background: var(--line); }
+.g-pow i.on { background: var(--warn); }
+.g-route { font-size: 12.5px; margin-top: 8px; }
+.g-pos { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+.g-ok { width: 100%; margin-top: 8px; min-height: 38px; }
+body.portrait .guide { top: auto; bottom: 10px; transform: none; animation: gInB .22s ease; }
+@keyframes gInB { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+#hudRecTxt { cursor: pointer; pointer-events: auto; }
+
+/* 큰 화면 조정 시트 */
+.adj { position: absolute; right: 8px; top: 8px; z-index: 5; width: min(300px, calc(100% - 16px));
+  background: rgba(16, 21, 28, .96); border: 1px solid rgba(63,167,255,.55); border-radius: 14px; padding: 10px 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5); animation: gInB .2s ease; }
+.adj-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.adj-head button { width: 32px; height: 32px; min-height: 0; padding: 0; }
+.adj-row { display: flex; align-items: center; gap: 4px; margin: 6px 0; }
+.adj-row button { min-height: 34px; padding: 2px 7px; font-size: 12.5px; }
+.adj-row input[type='range'] { flex: 1; min-width: 0; height: 30px; }
+.adj-val { min-width: 54px; text-align: center; font-variant-numeric: tabular-nums; font-size: 13px; }
+.adj-jog { height: 36px !important; margin: 4px 0; }
+.rail-gap { flex: 1; }
+
+/* 큰 화면(회전) 모드에서는 사진 입력 화면도 같은 방향으로 */
+body.rotated .photo { inset: auto; top: 0; left: 0; width: 100dvh; height: 100vw; transform-origin: top left; transform: translateX(100vw) rotate(90deg); }
