@@ -219,6 +219,8 @@ public class MainActivity extends Activity {
         public void setOrientation(String mode) {
             runOnUiThread(() -> setRequestedOrientation("landscape".equals(mode)
                     ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    : "portrait".equals(mode)
+                    ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT // 사진 촬영 화면
                     : ActivityInfo.SCREEN_ORIENTATION_FULL_USER));
         }
 

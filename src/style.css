@@ -496,5 +496,8 @@ body.portrait .guide { top: auto; bottom: 10px; transform: none; animation: gInB
 .adj-jog { height: 36px !important; margin: 4px 0; }
 .rail-gap { flex: 1; }
 
-/* 큰 화면(회전) 모드에서는 사진 입력 화면도 같은 방향으로 */
-body.rotated .photo { inset: auto; top: 0; left: 0; width: 100dvh; height: 100vw; transform-origin: top left; transform: translateX(100vw) rotate(90deg); }
+/* 사진 입력은 큰 화면(회전) 모드에서도 회전하지 않고 세로 전체 화면으로 — 카메라 영상이 넓게 보이도록 */
+
+/* 큰 화면(회전) 모드 뒤집기: 휴대폰을 반대 방향으로 눕혔을 때 */
+body.rotated.rotated-ccw .layout { transform: translateY(100dvh) rotate(-90deg); }
+body.rotated .rail [data-only='rotated'] { display: flex; }

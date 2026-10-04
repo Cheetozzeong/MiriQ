@@ -456,9 +456,11 @@ const TAP_SLOP = 6; // px
 // 포인터 위치 → 요소 자신의 좌표. 회전(와이드) 모드에서는 화면이 시계 방향 90° 돌아가 있으므로 역변환
 function localXY(el: Element, ev: PointerEvent): [number, number] {
   const r = el.getBoundingClientRect();
-  return document.body.classList.contains('rotated')
-    ? [ev.clientY - r.top, r.right - ev.clientX]
-    : [ev.clientX - r.left, ev.clientY - r.top];
+  const c = document.body.classList;
+  if (!c.contains('rotated')) return [ev.clientX - r.left, ev.clientY - r.top];
+  return c.contains('rotated-ccw')
+    ? [r.bottom - ev.clientY, ev.clientX - r.left] // 반시계 90°
+    : [ev.clientY - r.top, r.right - ev.clientX]; // 시계 90°
 }
 const screenPos = (ev: PointerEvent) => localXY(cv, ev);
 cv.addEventListener('pointerdown', (ev) => {
@@ -783,7 +785,7 @@ let activeSearch: { cancel(): void } | null = null;
 
 // 사용자 설정 (이 기기에 저장)
 const prefs = (() => {
-  const def = { skill: 'intermediate' as Skill, table: 'normal' as TableSpeed, easyFirst: true, priority: 'score' as Priority, bigMode: true };
+  const def = { skill: 'intermediate' as Skill, table: 'normal' as TableSpeed, easyFirst: true, priority: 'score' as Priority, bigMode: true, flip: false };
   try { return { ...def, ...JSON.parse(localStorage.getItem('miriq.prefs') || '{}') }; } catch { return def; }
 })();
 const savePrefs = () => { try { localStorage.setItem('miriq.prefs', JSON.stringify(prefs)); } catch { /* 저장 불가 */ } };
@@ -1283,6 +1285,7 @@ document.querySelectorAll<HTMLButtonElement>('#rail button').forEach((b) => b.ad
   const act = b.dataset.act;
   if (act === 'play') { closeDrawer(); startAnim(); return; }
   if (act === 'lock') { $('lock').click(); return; }
+  if (act === 'flip') { prefs.flip = !prefs.flip; savePrefs(); applyMode(); return; }
   if (act === 'adjust') { closeDrawer(); if ($('adj').classList.contains('hidden')) showAdj(); else hideAdj(); return; }
   if (act === 'photo') { closeDrawer(); hideAdj(); $('photoBtn').click(); return; }
   if (act === 'wide') { wideBtn.click(); return; }
@@ -1583,6 +1586,7 @@ function applyMode() {
   const rotated = wideMode && portraitMq.matches && mobileMq.matches;
   const wide = rotated || landscapeMq.matches;
   document.body.classList.toggle('rotated', rotated);
+  document.body.classList.toggle('rotated-ccw', rotated && !!prefs.flip);
   document.body.classList.toggle('wide', wide);
   document.body.classList.toggle('portrait', !wide && mobileMq.matches && portraitMq.matches);
   if (!document.body.classList.contains('portrait')) { document.body.classList.remove('sheet-min'); sheetState = 'mid'; }
@@ -1629,6 +1633,10 @@ initPhoto((l) => {
   layoutChanged();
   selectTab(0);
   closeDrawer();
+}, {
+  // 앱(APK) 큰 화면에서는 촬영 화면 동안만 세로로, 닫으면 다시 가로로
+  onOpen: () => { if (nativeApp && wideMode) nativeApp.setOrientation('portrait'); },
+  onClose: () => { if (nativeApp && wideMode) nativeApp.setOrientation('landscape'); },
 });
 
 loadFromHash();

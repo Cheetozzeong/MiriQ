@@ -136,7 +136,7 @@ function detectBalls(img: ImageData, k: number, cam: { x: number; y: number }, e
 }
 
 // ───────── 화면 흐름 ─────────
-export function initPhoto(onApply: (l: Layout) => void) {
+export function initPhoto(onApply: (l: Layout) => void, hooks: { onOpen?: () => void; onClose?: () => void } = {}) {
   const root = $('photo');
   const steps = root.querySelectorAll<HTMLElement>('[data-step]');
   const show = (name: string) => steps.forEach((s) => s.classList.toggle('hidden', s.dataset.step !== name));
@@ -149,10 +149,11 @@ export function initPhoto(onApply: (l: Layout) => void) {
   const K = 300; // 위에서 본 이미지 해상도 (px/m)
 
   const stopCam = () => { stream?.getTracks().forEach((t) => t.stop()); stream = null; };
-  const close = () => { stopCam(); root.classList.add('hidden'); document.body.classList.remove('photo-open'); };
+  const close = () => { stopCam(); root.classList.add('hidden'); document.body.classList.remove('photo-open'); hooks.onClose?.(); };
   $('phClose').addEventListener('click', close);
   $('photoBtn').addEventListener('click', () => {
     root.classList.remove('hidden'); document.body.classList.add('photo-open'); show('guide');
+    hooks.onOpen?.();
   });
 
   // 촬영 위치: 단쿠션 쪽 / 장쿠션 쪽 → 코너 ↔ 테이블 좌표 대응 (오른손 좌표계 유지)
@@ -251,12 +252,10 @@ export function initPhoto(onApply: (l: Layout) => void) {
       cctx.strokeStyle = '#fff'; cctx.lineWidth = 2; cctx.beginPath(); cctx.arc(cxp, cyp, r, 0, Math.PI * 2); cctx.stroke();
     }
   }
-  // 포인터 → 캔버스 좌표. 큰 화면(회전) 모드에서는 화면 전체가 시계 방향 90° 돌아가 있으므로 역변환
+  // 포인터 → 캔버스 좌표 (사진 입력 화면은 회전하지 않으므로 그대로)
   const local = (c: HTMLCanvasElement, ev: PointerEvent): Pos => {
     const r = c.getBoundingClientRect();
-    return document.body.classList.contains('rotated')
-      ? { x: ev.clientY - r.top, y: r.right - ev.clientX }
-      : { x: ev.clientX - r.left, y: ev.clientY - r.top };
+    return { x: ev.clientX - r.left, y: ev.clientY - r.top };
   };
   cc.addEventListener('pointerdown', (ev) => {
     const p = local(cc, ev);
