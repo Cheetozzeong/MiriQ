@@ -1489,10 +1489,13 @@ function showGuide() {
   $('gPos').textContent = BALL_IDS.map((id) => `${KO[id]} ${(layout[id].x / DIAMOND).toFixed(1)},${(layout[id].y / DIAMOND).toFixed(1)}`).join(' · ') + ' (포인트)';
   $('guide').classList.remove('hidden');
 }
-function hideGuide() { $('guide').classList.add('hidden'); }
+function hideGuide() { clearTimeout(guideTimer); $('guide').classList.add('hidden'); }
 $('gOk').addEventListener('click', hideGuide);
 $('hudRecTxt').addEventListener('click', () => showGuide()); // 테이블 위 추천 표시를 누르면 다시 보기
-const guideSoon = () => requestAnimationFrame(() => requestAnimationFrame(() => showGuide()));
+// 추천을 바꾸면 바로 띄우지 않고 1.5초 기다렸다가 표시 (그 사이 또 바꾸면 다시 기다림)
+let guideTimer = 0;
+const GUIDE_DELAY = 1500;
+const guideSoon = () => { hideGuide(); guideTimer = window.setTimeout(showGuide, GUIDE_DELAY); };
 
 // ───────── 큰 화면 조정 시트: 방향(±·문지르기)·힘 ─────────
 function syncAdj() {
