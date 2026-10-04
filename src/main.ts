@@ -714,6 +714,14 @@ function setProgress(p: number | null, text = '') {
   $('progress').classList.toggle('hidden', p === null);
   if (p !== null) ($('progress').firstElementChild as HTMLElement).style.width = `${p * 100}%`;
   $('recStatus').innerHTML = text;
+  setTableLoading(p === null ? null : `추천 경로 찾는 중… ${Math.round(p * 100)}%`, p);
+}
+// 테이블 위 로딩 표시: 시트를 접어 둬도 탐색 중임을 알 수 있게
+function setTableLoading(text: string | null, p: number | null = null) {
+  $('tableLoading').classList.toggle('hidden', text === null);
+  if (text === null) return;
+  $('tlText').textContent = text;
+  $('tlBar').style.width = `${(p ?? 0) * 100}%`;
 }
 
 // 순위: ① 공을 먼저 맞히는 샷(직접) → ② 빈쿠션은 직접 샷 다음에. 각 그룹 안에서는 점수(확률 − 난이도) 순,
@@ -799,6 +807,7 @@ function layoutChanged() {
   saveHistory();
   if (!($('autoRec') as HTMLInputElement).checked) { setProgress(null, '배치가 바뀌었습니다. <b>추천 받기</b>를 눌러 주세요.'); return; }
   setProgress(null, '배치 변경 — 곧 추천을 시작합니다');
+  setTableLoading('배치 변경 확인 — 추천 경로 찾는 중…', 0);
   recTimer = window.setTimeout(recommend, 450);
 }
 

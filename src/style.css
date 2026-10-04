@@ -416,3 +416,17 @@ body.portrait .rec-status { margin: 4px 0; font-size: 12px; }
 .sys-help li { margin: 2px 0; }
 body.portrait .first-row .note, body.wide .first-row .note { display: none; }
 body.portrait .first-row { margin: 0 0 4px; }
+
+/* 추천 탐색 중 — 테이블 위 로딩 표시 */
+.table-loading { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 3; pointer-events: none;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 24px);
+  background: rgba(10, 14, 20, .85); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  border: 1px solid rgba(63,167,255,.5); border-radius: 12px; padding: 8px 14px; font-size: 13px; white-space: nowrap; }
+.table-loading.hidden { display: none; }
+.table-loading .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.tl-bar { flex-basis: 100%; height: 4px; background: rgba(255,255,255,.12); border-radius: 2px; overflow: hidden; }
+.tl-bar > div { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+
+/* 숨김은 항상 우선 (개별 display 지정보다 강하게) */
+.hidden { display: none !important; }

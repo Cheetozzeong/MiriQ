@@ -29,6 +29,11 @@
           </div>
           <button id="hudMini" class="hud-mini" aria-label="추천 정보 펼치기"></button>
         </div>
+        <!-- 추천 탐색 중 표시 (모든 화면) -->
+        <div id="tableLoading" class="table-loading hidden" role="status" aria-live="polite">
+          <span class="spin"></span><span id="tlText">추천 경로 찾는 중…</span>
+          <div class="tl-bar"><div id="tlBar"></div></div>
+        </div>
       </div>
       <div class="table-bar">
         <button id="play" class="primary">▶ 재생</button>
