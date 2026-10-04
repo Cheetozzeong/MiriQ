@@ -76,12 +76,16 @@
         </div>
         <div class="rec-head">
           <button id="recBtn" class="primary big">⟳ 추천 받기</button>
-          <div class="seg" id="recMode" title="빠름: 당점 3종 · 정밀: 당점·힘·끌어치기 조합 17종">
-            <button data-v="fast" class="on">빠름</button><button data-v="fine">정밀</button>
-          </div>
+          <select id="prioSel" title="추천 기준">
+            <option value="score">득점 우선</option>
+            <option value="position">후구 배치 우선</option>
+            <option value="defense">수비 우선</option>
+            <option value="balanced">균형</option>
+          </select>
           <button id="recOptBtn" class="icon-btn" aria-expanded="false" title="추천 설정">⚙</button>
         </div>
         <div class="rec-opts" id="recOpts">
+          <div class="opt"><span>탐색</span><div class="seg sm" id="recMode" title="빠름: 힘·당점 6종 · 정밀: 끌어치기 포함 18종"><button data-v="fast" class="on">빠름</button><button data-v="fine">정밀</button></div></div>
           <div class="opt"><span>실력</span><div class="seg sm" id="skillSel"><button data-v="beginner">입문</button><button data-v="intermediate">중급</button><button data-v="advanced">상급</button></div></div>
           <div class="opt"><span>테이블</span><div class="seg sm" id="tableSel"><button data-v="slow">느림</button><button data-v="normal">보통</button><button data-v="fast">빠름</button></div></div>
           <label class="chk"><input type="checkbox" id="easyFirst" checked /> 쉬운 샷 우선</label>

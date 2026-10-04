@@ -433,3 +433,13 @@ body.portrait .first-row { margin: 0 0 4px; }
 
 #firstSel button:disabled { opacity: .55; cursor: not-allowed; }
 #firstSel button.on:disabled { opacity: 1; }
+
+/* 추천 기준 선택 + 카드의 세 지표 */
+#prioSel { height: 44px; min-width: 0; flex: 0 1 auto; }
+body.portrait #prioSel, body.wide #prioSel { height: 40px; min-height: 40px; font-size: 14px; }
+.metrics { display: flex; gap: 10px; margin-top: 5px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.metric { display: inline-flex; align-items: center; gap: 4px; }
+.metric .m-bar { width: 34px; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.metric .m-bar > i { display: block; height: 100%; }
+.metric.prio { color: var(--text); font-weight: 600; }
+.metric .wait { opacity: .6; }

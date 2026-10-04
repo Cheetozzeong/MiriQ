@@ -5,7 +5,7 @@ import {
 } from './physics';
 import { calibrate, railPoint, solveSystem, type SystemResult } from './systems';
 import type { ScanRange } from './ranges';
-import type { ShotSummary, WorkerRequest, WorkerResponse } from './worker';
+import { runJob, type ShotSummary, type WorkerRequest, type WorkerResponse } from './jobs';
 import { initPhoto } from './photo';
 import { LEVEL_KO, difficulty, howTo, pattern, powerLevel, thicknessText, tipClock, type Difficulty } from './analysis';
 
@@ -27,6 +27,9 @@ let prob: number | null = null;
 let sysRes: SystemResult | null = null;
 interface Candidate extends ScanRange {
   direct?: boolean; // 탐색 단계에서 본 1차 분류: 공을 먼저 맞힘
+  position?: number; // 후구 배치 (0~1): 득점 후 멈춘 배치에서 다음 샷의 쉬움
+  defense?: number; // 수비 (0~1): 실패했을 때 상대가 치기 어려운 정도
+  next?: Layout; // 이 샷 뒤 예상 배치
   tipX: number; tipY: number; speed: number; prob: number; score: number;
   summary?: ShotSummary; diff?: Difficulty; pat?: { key: string; label: string }; pending?: boolean;
 }
@@ -41,49 +44,95 @@ const newWorker = () => new Worker(new URL('./worker.ts', import.meta.url), { ty
 // 현재 샷 성공 확률 전용 워커 (상시)
 const probe = newWorker();
 let reqId = 0, probId = 0;
-probe.onmessage = (ev: MessageEvent<WorkerResponse>) => {
-  const m = ev.data;
+const onProbe = (m: WorkerResponse) => {
   if (m.kind === 'eval' && m.id === probId) { prob = m.prob; renderDetail(); renderDispute(); }
 };
+probe.onmessage = (ev: MessageEvent<WorkerResponse>) => onProbe(ev.data);
+let probeBroken = false;
+probe.onerror = (e) => { e.preventDefault(); probeBroken = true; };
 let probTimer = 0;
 function requestProb() {
   prob = null;
   clearTimeout(probTimer);
   probTimer = window.setTimeout(() => {
     probId = ++reqId;
-    probe.postMessage({ kind: 'eval', id: probId, layout, shot, width: -1, n: 40, err: SKILL[prefs.skill as Skill], table: prefs.table } satisfies WorkerRequest);
+    const req: WorkerRequest = { kind: 'eval', id: probId, layout, shot, width: -1, n: 40, err: SKILL[prefs.skill as Skill], table: prefs.table };
+    if (probeBroken || workersBroken) runJob(req, onProbe); else probe.postMessage(req);
   }, 200);
 }
 
 // 작업 여러 개를 코어 수만큼 워커에 나눠 실행. cancel() 시 워커를 종료하고 결과는 버린다
+// 안정장치: 워커가 오류로 죽거나 40초 넘게 응답이 없으면 새 워커로 한 번 다시 시도하고,
+// 그래도 안 되면(워커를 못 쓰는 환경 포함) 메인 스레드에서 직접 계산 → 진행률이 멈춘 채 끝나지 않는 일 방지
+let workersBroken = false;
+const JOB_TIMEOUT = 40000;
 function runPool<T extends WorkerResponse>(reqs: WorkerRequest[], onProgress: (p: number) => void, onResult?: (i: number, r: T) => void) {
   const n = Math.max(1, Math.min(reqs.length, (navigator.hardwareConcurrency || 4) - 1, 8));
-  const workers = Array.from({ length: n }, newWorker);
+  const live = new Set<Worker>();
   const results: T[] = new Array(reqs.length);
   const prog = new Array(reqs.length).fill(0);
-  let next = 0, done = 0, cancelled = false;
-  const promise = new Promise<T[]>((resolve) => {
-    if (!reqs.length) { resolve([]); return; }
-    const assign = (w: Worker) => {
-      if (next >= reqs.length) return;
-      const i = next++;
-      w.onmessage = (ev: MessageEvent<WorkerResponse>) => {
-        if (cancelled) return;
-        const m = ev.data;
-        if (m.kind === 'progress') prog[i] = m.value;
-        else {
-          results[i] = m as T; prog[i] = 1; done++;
-          onResult?.(i, m as T);
-          if (done === reqs.length) { workers.forEach((x) => x.terminate()); resolve(results); }
-          else assign(w);
-        }
-        onProgress(prog.reduce((a, b) => a + b, 0) / reqs.length);
-      };
-      w.postMessage({ ...reqs[i], id: i });
+  const tries = new Array(reqs.length).fill(0);
+  const queue = reqs.map((_, i) => i);
+  let done = 0, cancelled = false;
+  let resolve!: (r: T[]) => void;
+  const promise = new Promise<T[]>((r) => { resolve = r; });
+  const report = () => onProgress(prog.reduce((a, b) => a + b, 0) / Math.max(1, reqs.length));
+  const finish = (i: number, m: T) => {
+    if (cancelled || results[i]) return;
+    results[i] = m; prog[i] = 1; done++;
+    onResult?.(i, m);
+    report();
+    if (done === reqs.length) { live.forEach((w) => w.terminate()); live.clear(); resolve(results); }
+  };
+  // 메인 스레드에서 실행 (다음 프레임에 양보하며)
+  const runOnMain = (i: number) => setTimeout(() => {
+    if (cancelled) return;
+    runJob({ ...reqs[i], id: i }, (m) => {
+      if (m.kind === 'progress') { prog[i] = m.value; return; }
+      finish(i, m as T);
+    });
+    if (queue.length) runOnMain(queue.shift()!);
+  }, 0);
+  const startWorker = () => {
+    if (cancelled || !queue.length) return;
+    if (workersBroken) { runOnMain(queue.shift()!); return; }
+    let w: Worker;
+    try { w = newWorker(); } catch { workersBroken = true; runOnMain(queue.shift()!); return; }
+    live.add(w);
+    let cur = -1, timer = 0, gotAny = false;
+    const next = () => {
+      clearTimeout(timer);
+      if (cancelled || !queue.length) { w.terminate(); live.delete(w); return; }
+      cur = queue.shift()!;
+      tries[cur]++;
+      timer = window.setTimeout(() => fail(), JOB_TIMEOUT);
+      w.postMessage({ ...reqs[cur], id: cur });
     };
-    workers.forEach(assign);
-  });
-  return { promise, cancel: () => { cancelled = true; workers.forEach((w) => w.terminate()); } };
+    const fail = () => {
+      clearTimeout(timer);
+      w.terminate(); live.delete(w);
+      if (cancelled) return;
+      if (!gotAny) workersBroken = true; // 한 번도 응답 못 한 워커 = 이 환경에선 워커 사용 불가
+      if (cur >= 0 && !results[cur]) {
+        if (tries[cur] < 2 && !workersBroken) queue.unshift(cur); else runOnMain(cur);
+      }
+      startWorker();
+    };
+    w.onmessage = (ev: MessageEvent<WorkerResponse>) => {
+      if (cancelled) return;
+      gotAny = true;
+      const m = ev.data;
+      if (m.kind === 'progress') { prog[cur] = m.value; report(); clearTimeout(timer); timer = window.setTimeout(() => fail(), JOB_TIMEOUT); return; }
+      finish(cur, m as T);
+      next();
+    };
+    w.onerror = (e) => { e.preventDefault(); fail(); };
+    w.onmessageerror = () => fail();
+    next();
+  };
+  if (!reqs.length) resolve([]);
+  else for (let k = 0; k < n; k++) startWorker();
+  return { promise, cancel: () => { cancelled = true; live.forEach((w) => w.terminate()); live.clear(); } };
 }
 
 // ───────── 예측 ─────────
@@ -720,12 +769,21 @@ const MODES = {
   ],
 };
 let recMode: keyof typeof MODES = 'fast';
+// 추천 기준: 지표별 가중치 [득점 확률, 후구 배치, 수비]
+type Priority = 'score' | 'position' | 'defense' | 'balanced';
+const PRIO: Record<Priority, { label: string; w: [number, number, number] }> = {
+  score: { label: '득점 우선', w: [1, 0.15, 0.1] },
+  position: { label: '후구 배치 우선', w: [0.55, 0.65, 0.1] },
+  defense: { label: '수비 우선', w: [0.55, 0.1, 0.65] },
+  balanced: { label: '균형', w: [0.7, 0.35, 0.35] },
+};
+let pool: Candidate[] = []; // 득점이 확인된 모든 후보 (기준을 바꾸면 여기서 다시 고름)
 let searchGen = 0;
 let activeSearch: { cancel(): void } | null = null;
 
 // 사용자 설정 (이 기기에 저장)
 const prefs = (() => {
-  const def = { skill: 'intermediate' as Skill, table: 'normal' as TableSpeed, easyFirst: true };
+  const def = { skill: 'intermediate' as Skill, table: 'normal' as TableSpeed, easyFirst: true, priority: 'score' as Priority };
   try { return { ...def, ...JSON.parse(localStorage.getItem('miriq.prefs') || '{}') }; } catch { return def; }
 })();
 const savePrefs = () => { try { localStorage.setItem('miriq.prefs', JSON.stringify(prefs)); } catch { /* 저장 불가 */ } };
@@ -747,9 +805,11 @@ function setTableLoading(text: string | null, p: number | null = null) {
 
 // 순위: ① 공을 먼저 맞히는 샷(직접) → ② 빈쿠션은 직접 샷 다음에. 각 그룹 안에서는 점수(확률 − 난이도) 순,
 // 경로 형태별 대표를 먼저 골라 비슷한 샷만 나오지 않게 함
-function rankCandidates(list: Candidate[]) {
+function rankCandidates(list: Candidate[], prio: Priority = prefs.priority as Priority, limit = 6) {
   const w = prefs.easyFirst ? 0.75 : 0.25;
-  for (const c of list) c.score = c.prob * 100 - w * (c.diff?.score ?? 0);
+  const [ws, wp, wd] = PRIO[prio].w;
+  // 아직 평가 전인 후구·수비는 약간 낮게(0.3) 가정 → 평가가 끝난 좋은 후보가 위로
+  for (const c of list) c.score = ws * c.prob * 100 + wp * (c.position ?? 0.3) * 100 + wd * (c.defense ?? 0.3) * 100 - w * (c.diff?.score ?? 0);
   const pick = (group: Candidate[]) => {
     group.sort((a, b) => b.score - a.score);
     const out: Candidate[] = [], seen = new Set<string>();
@@ -761,7 +821,7 @@ function rankCandidates(list: Candidate[]) {
   const bank = pick(list.filter((c) => c.summary?.cushionFirst));
   // 성공 확률 5% 미만은 사실상 치기 어려운 샷 → 직접·빈쿠션 모두 뒤로
   const ok = (c: Candidate) => c.prob >= 0.05;
-  return [...direct.filter(ok), ...bank.filter(ok), ...direct.filter((c) => !ok(c)), ...bank.filter((c) => !ok(c))].slice(0, 6);
+  return [...direct.filter(ok), ...bank.filter(ok), ...direct.filter((c) => !ok(c)), ...bank.filter((c) => !ok(c))].slice(0, limit);
 }
 
 async function recommend() {
@@ -808,23 +868,51 @@ async function recommend() {
     scored.push({ ...c, angleDeg: e.angleDeg, prob: e.prob, summary: e.summary, pending: false, score: 0,
       diff: difficulty(lay, shotC, e.summary), pat: pattern(e.summary) });
   });
-  candidates = rankCandidates(scored);
+  pool = scored;
+  candidates = rankCandidates(pool);
   activeSearch = null;
   renderCands();
-  const sec = ((performance.now() - t0) / 1000).toFixed(1);
-  setProgress(null, candidates.length
-    ? `득점 샷 ${candidates.length}개 (직접 ${candidates.filter((c) => !c.summary?.cushionFirst).length} · 빈쿠션 ${candidates.filter((c) => c.summary?.cushionFirst).length}) · ${sec}초 <span class="rec-sum">(${prefsSummary()})</span>`
-    : `득점 경로를 찾지 못했습니다${recMode === 'fast' ? ' — <b>정밀</b> 모드로 다시 시도해 보세요' : ''}`);
+  const doneText = () => `득점 샷 ${candidates.length}개 (직접 ${candidates.filter((c) => !c.summary?.cushionFirst).length} · 빈쿠션 ${candidates.filter((c) => c.summary?.cushionFirst).length}) · ${((performance.now() - t0) / 1000).toFixed(1)}초 <span class="rec-sum">(${prefsSummary()})</span>`;
   $('disputeBtn').classList.remove('hidden');
-  if (candidates.length) applyCandidate(0);
-  else renderCands();
+  if (!candidates.length) {
+    setProgress(null, `득점 경로를 찾지 못했습니다${recMode === 'fast' ? ' — <b>정밀</b> 모드로 다시 시도해 보세요' : ''}`);
+    renderCands();
+    return;
+  }
+  // 득점 우선이면 바로 1순위를 보여주고, 후구·수비는 뒤에서 계산해 카드에 채움
+  const waitPos = prefs.priority !== 'score';
+  if (!waitPos) { setProgress(null, doneText()); applyCandidate(0); }
+  // 3단계: 상위 후보(득점 기준 8개)의 후구 배치·수비 평가
+  const targets = rankCandidates(pool, 'score', 8);
+  const posJob = runPool<Extract<WorkerResponse, { kind: 'pos' }>>(
+    targets.map((c) => ({ kind: 'pos', id: 0, layout: lay, shot: { ...base, angleDeg: c.angleDeg, speed: c.speed, tipX: c.tipX, tipY: c.tipY }, err, table: prefs.table })),
+    (p) => {
+      if (gen !== searchGen) return;
+      if (waitPos) setProgress(p, `후구 배치·수비 평가 중… ${Math.round(p * 100)}%`);
+      else $('recStatus').innerHTML = `${doneText()} <span class="note">· 후구·수비 평가 ${Math.round(p * 100)}%</span>`;
+    },
+    (i, r) => {
+      if (gen !== searchGen) return;
+      Object.assign(targets[i], { position: r.position, defense: r.defense, next: r.next });
+      renderCands();
+    },
+  );
+  activeSearch = posJob;
+  await posJob.promise;
+  if (gen !== searchGen) return;
+  activeSearch = null;
+  const cur = currentCand() >= 0 ? candidates[currentCand()] : null;
+  candidates = rankCandidates(pool);
+  setProgress(null, doneText());
+  if (waitPos || !cur) applyCandidate(0);
+  else renderCands(); // 득점 우선: 보고 있던 샷은 그대로 두고 지표만 갱신
 }
 
 let recTimer = 0;
 function layoutChanged() {
   activeSearch?.cancel(); searchGen++;
   $('disputeBtn').classList.add('hidden');
-  candidates = []; lastApplied = -1; renderCands();
+  candidates = []; pool = []; lastApplied = -1; renderCands();
   clearTimeout(recTimer);
   saveHistory();
   if (!($('autoRec') as HTMLInputElement).checked) { setProgress(null, '배치가 바뀌었습니다. <b>추천 받기</b>를 눌러 주세요.'); return; }
@@ -855,6 +943,20 @@ function tipLabel(tx: number, ty: number) {
   const vert = Math.abs(ty) < 0.03 ? '' : ` · ${ty > 0 ? '상' : '하'} ${(Math.abs(ty) / 0.2).toFixed(1)}팁`;
   return side + vert;
 }
+// 카드의 세 지표: 득점 확률 · 후구 배치 · 수비 (선택한 기준은 강조)
+function metricsHtml(c: Candidate) {
+  const prio = prefs.priority as Priority;
+  const bar = (v: number | undefined) => {
+    if (v === undefined) return '<span class="wait">계산 중</span>';
+    const col = v > 0.6 ? 'var(--ok)' : v > 0.3 ? 'var(--warn)' : 'var(--fail)';
+    return `<span class="m-bar"><i style="width:${Math.round(v * 100)}%;background:${col}"></i></span>${v > 0.6 ? '좋음' : v > 0.3 ? '보통' : '나쁨'}`;
+  };
+  return `<div class="metrics">
+    <span class="metric${prio === 'score' ? ' prio' : ''}">득점 ${Math.round(c.prob * 100)}%</span>
+    <span class="metric${prio === 'position' ? ' prio' : ''}" title="득점 후 멈춘 배치에서 다음 샷의 쉬움">후구 ${bar(c.position)}</span>
+    <span class="metric${prio === 'defense' ? ' prio' : ''}" title="실패했을 때 상대가 치기 어려운 정도">수비 ${bar(c.defense)}</span>
+  </div>`;
+}
 function renderCands() {
   const ol = $('cands');
   const cur = currentCand();
@@ -877,6 +979,7 @@ function renderCands() {
         <b class="pct" style="color:${color}">${pct}%</b></div>
       <div class="how"><b>${h.aim}</b> · ${tipIcon(c.tipX, c.tipY)} ${h.tip} · ${h.power}</div>
       <div class="route">${route}${s?.kiss ? ' <span class="kiss">키스 주의</span>' : ''}</div>
+      ${metricsHtml(c)}
       ${c.diff && c.diff.reasons.length ? `<div class="note">까다로운 점: ${c.diff.reasons.slice(0, 3).join(', ')}</div>` : ''}
       ${i === cur ? '<div class="tag">적용됨 · 한 번 더 탭하면 재생</div>' : ''}
     </li>`;
@@ -904,7 +1007,19 @@ $('recOptBtn').addEventListener('click', () => {
   const open = recOpts.classList.toggle('collapsed') === false;
   $('recOptBtn').setAttribute('aria-expanded', String(open));
 });
-const prefsSummary = () => `${shot.opening ? '초구 규칙 · ' : shot.firstBall ? `1적구 ${KO[shot.firstBall]} · ` : ''}${SKILL[prefs.skill as Skill].label} · 테이블 ${TABLE_SPEED[prefs.table as TableSpeed].label}${prefs.easyFirst ? ' · 쉬운 샷 우선' : ''}`;
+const prefsSummary = () => `${PRIO[prefs.priority as Priority].label} · ${shot.opening ? '초구 규칙 · ' : shot.firstBall ? `1적구 ${KO[shot.firstBall]} · ` : ''}${SKILL[prefs.skill as Skill].label} · 테이블 ${TABLE_SPEED[prefs.table as TableSpeed].label}${prefs.easyFirst ? ' · 쉬운 샷 우선' : ''}`;
+
+// 추천 기준 선택: 후구·수비 평가가 끝났으면 바로 다시 정렬, 아니면 새로 탐색
+const prioSel = $<HTMLSelectElement>('prioSel');
+prioSel.value = prefs.priority;
+prioSel.addEventListener('change', () => {
+  prefs.priority = prioSel.value as Priority; savePrefs();
+  if (!activeSearch && pool.some((c) => c.position !== undefined)) {
+    candidates = rankCandidates(pool);
+    applyCandidate(0);
+    renderCands();
+  } else { clearTimeout(recTimer); recommend(); }
+});
 
 // 설정: 실력 단계 · 테이블 상태 · 쉬운 샷 우선
 function bindSeg(id: string, key: 'skill' | 'table', after: () => void) {
@@ -918,7 +1033,7 @@ bindSeg('tableSel', 'table', () => { setTableSpeed(prefs.table); recompute(); cl
 ($('easyFirst') as HTMLInputElement).checked = prefs.easyFirst;
 $('easyFirst').addEventListener('change', () => {
   prefs.easyFirst = ($('easyFirst') as HTMLInputElement).checked; savePrefs();
-  if (candidates.length && !candidates[0].pending) { candidates = rankCandidates(candidates); applyCandidate(0); }
+  if (pool.length && !activeSearch) { candidates = rankCandidates(pool); applyCandidate(0); }
 });
 
 // ───────── 재생 ─────────

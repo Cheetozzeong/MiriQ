@@ -70,6 +70,7 @@ export interface SimResult {
   outcome: Outcome;
   duration: number;
   nearMiss: number;
+  final: Layout; // 시뮬레이션이 끝났을 때 공 위치 (끝까지 돌리면 = 다음 배치)
 }
 
 export interface SimOptions {
@@ -342,11 +343,15 @@ export function simulate(layout: Layout, shot: Shot, opt: SimOptions = {}): SimR
   else if (!secondHit) reason = `1적구(${KO[firstHit]})만 맞고 2적구를 맞히지 못했습니다 (쿠션 ${cushionCount}회)`;
   else if (!scored) reason = `2적구 전에 쿠션 ${cushionsBeforeSecond}회 — 3쿠션 미달`;
   else reason = `1적구 ${KO[firstHit]} → 쿠션 ${cushionsBeforeSecond}회 → 2적구 ${KO[secondHit]} 득점`;
+  const final = clone3(layout);
+  for (const b of balls) final[b.id] = { x: b.x, y: b.y };
   return {
-    paths, frames, events, duration: t, nearMiss,
+    paths, frames, events, duration: t, nearMiss, final,
     outcome: { scored, firstHit, secondHit, cushionsBeforeSecond: secondHit ? cushionsBeforeSecond : cushionCount, cueCushions, kiss, reason },
   };
 }
+
+const clone3 = (l: Layout): Layout => ({ white: { ...l.white }, yellow: { ...l.yellow }, red: { ...l.red } });
 
 export const KO: Record<BallId, string> = { white: '흰공', yellow: '노란공', red: '빨간공' };
 
@@ -379,6 +384,27 @@ export const SKILL: Record<Skill, ErrorModel & { label: string; desc: string }> 
   intermediate: { angle: 0.55, speed: 0.08, tip: 0.07, label: '중급', desc: '에버리지 0.3~0.7' },
   advanced: { angle: 0.35, speed: 0.05, tip: 0.05, label: '상급', desc: '에버리지 0.7 이상' },
 };
+
+// 오차를 넣은 샷 하나 만들기
+export function perturb(shot: Shot, err: ErrorModel, r: () => number): Shot {
+  return {
+    ...shot,
+    angleDeg: shot.angleDeg + gauss(r) * err.angle,
+    speed: shot.speed * (1 + gauss(r) * err.speed),
+    tipX: shot.tipX + gauss(r) * err.tip,
+    tipY: shot.tipY + gauss(r) * err.tip,
+  };
+}
+
+// 배치의 "치기 쉬움" (0~1): 3° 간격 120방향 × 기본 힘·당점 2가지를 빠르게 훑어 득점 방향이 많을수록 높음
+export function layoutEase(layout: Layout, cue: BallId): number {
+  const variants = [{ speed: 2.8, tipX: 0.3, tipY: 0.2 }, { speed: 3.2, tipX: -0.3, tipY: 0.2 }];
+  let n = 0;
+  for (const v of variants) for (let a = 0; a < 360; a += 3) {
+    if (scanShot(layout, { cue, angleDeg: a, ...v }) === 2) n++;
+  }
+  return 1 - Math.exp(-n / 4);
+}
 
 // 오차를 반영한 성공 확률 (n회 무작위 시뮬레이션)
 export function robustness(layout: Layout, shot: Shot, n = 40, err: ErrorModel = SKILL.intermediate): number {
