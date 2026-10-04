@@ -52,7 +52,7 @@
     </nav>
 
     <nav class="tabs" id="tabs">
-      <button data-tab="0" class="on">★ 추천</button><button data-tab="1">배치</button><button data-tab="2">샷 조정</button><button data-tab="3">시스템</button>
+      <button data-tab="1">① 배치</button><button data-tab="0" class="on">② 추천</button><button data-tab="2">③ 조정</button><button data-tab="3">시스템</button>
     </nav>
 
     <aside class="panel" id="panel">
@@ -65,16 +65,38 @@
             <button data-v="fast" class="on">빠름</button><button data-v="fine">정밀</button>
           </div>
         </div>
-        <label class="chk"><input type="checkbox" id="autoRec" checked /> 배치가 바뀌면 자동으로 추천</label>
+        <div class="rec-opts">
+          <div class="opt"><span>실력</span><div class="seg sm" id="skillSel"><button data-v="beginner">입문</button><button data-v="intermediate">중급</button><button data-v="advanced">상급</button></div></div>
+          <div class="opt"><span>테이블</span><div class="seg sm" id="tableSel"><button data-v="slow">느림</button><button data-v="normal">보통</button><button data-v="fast">빠름</button></div></div>
+          <label class="chk"><input type="checkbox" id="easyFirst" checked /> 쉬운 샷 우선</label>
+          <label class="chk"><input type="checkbox" id="autoRec" checked /> 배치 바뀌면 자동 추천</label>
+        </div>
         <div id="recStatus" class="rec-status"></div>
         <div id="progress" class="progress hidden"><div></div></div>
         <ol id="cands" class="cards"></ol>
+        <div id="logBox" class="log-box hidden">
+          <span>이 샷 쳐봤나요?</span>
+          <button data-r="scored" class="log-ok">득점</button><button data-r="missed" class="log-miss">실패</button>
+          <span id="logMsg" class="note"></span>
+        </div>
+        <p id="statsNote" class="note"></p>
         <button id="disputeBtn" class="dispute-entry hidden">추천이 아쉬운가요? <b>이의제기</b> — 내 샷 제안하기</button>
         <p id="queueNote" class="note hidden"></p>
       </details>
 
       <details open>
         <summary>① 배치</summary>
+        <button id="photoBtn" class="primary photo-btn">📷 사진으로 배치 입력</button>
+        <div class="place-tools">
+          <span class="lbl">탭 배치</span>
+          <div class="seg" id="placeSel"><button data-v="white">흰공</button><button data-v="yellow">노란공</button><button data-v="red">빨간공</button></div>
+        </div>
+        <p class="note" id="placeHint">공을 고른 뒤 테이블을 탭하면 그 자리에 놓입니다 (흰공 → 노란공 → 빨간공 순서로 자동 진행)</p>
+        <div class="row">
+          <label class="chk"><input type="checkbox" id="snap" /> 격자에 맞춤 (0.25포인트)</label>
+          <button class="mini" id="undoBtn">↶ 되돌리기</button><button class="mini" id="redoBtn">↷ 다시</button>
+          <button class="mini" id="shareBtn">🔗 배치 공유</button>
+        </div>
         <div class="row">
           <span class="lbl">수구</span>
           <div class="seg" id="cueSel">
@@ -154,6 +176,62 @@
       </details>
     </aside>
   </main>
+  <!-- 사진으로 배치 입력 -->
+  <div id="photo" class="photo hidden" role="dialog" aria-label="사진으로 배치 입력">
+    <div class="ph-head"><b>📷 사진으로 배치 입력</b><button id="phClose" aria-label="닫기">✕</button></div>
+
+    <section data-step="guide" class="ph-step">
+      <svg class="ph-illust" viewBox="0 0 320 170" aria-hidden="true">
+        <polygon points="70,40 250,40 300,125 20,125" fill="#1d5ea6" stroke="#5b3a22" stroke-width="8" stroke-linejoin="round"/>
+        <circle cx="120" cy="95" r="7" fill="#f7f7f2"/><circle cx="185" cy="70" r="6" fill="#f4c430"/><circle cx="215" cy="100" r="7" fill="#d9262c"/>
+        <g fill="none" stroke="#f5b942" stroke-width="2"><circle cx="70" cy="40" r="7"/><circle cx="250" cy="40" r="7"/><circle cx="300" cy="125" r="7"/><circle cx="20" cy="125" r="7"/></g>
+        <rect x="140" y="138" width="40" height="26" rx="5" fill="#2f3945" stroke="#8d99a8"/>
+        <text x="160" y="155" fill="#e7ecf2" font-size="10" text-anchor="middle">📱</text>
+        <text x="160" y="22" fill="#8d99a8" font-size="11" text-anchor="middle">코너 4곳이 모두 보이게 · 단쿠션 뒤에서 내려다보며</text>
+      </svg>
+      <ol class="ph-tips">
+        <li><b>단쿠션(짧은 쪽) 뒤</b>에 서서 테이블 전체가 보이게 찍어 주세요.</li>
+        <li>휴대폰은 <b>가로</b>로, <b>눈높이 이상</b>으로 들고 비스듬히 내려다보면 됩니다. 수직으로 찍을 필요는 없어요.</li>
+        <li><b>네 코너가 모두</b> 화면 안에 들어와야 하고, 공이 사람·큐에 가려지지 않게 해 주세요.</li>
+        <li>너무 낮게(테이블 높이에 가깝게) 찍으면 먼 쪽 공의 오차가 커집니다.</li>
+      </ol>
+      <div class="ph-side">
+        <span>촬영 위치</span>
+        <label><input type="radio" name="phSide" value="short" checked /> 단쿠션 쪽</label>
+        <label><input type="radio" name="phSide" value="long" /> 장쿠션 쪽</label>
+      </div>
+      <div class="ph-actions">
+        <button id="phCamera" class="primary">📷 카메라로 촬영</button>
+        <label class="file-btn">🖼 사진 불러오기<input type="file" accept="image/*" id="phFile" hidden /></label>
+        <input type="file" accept="image/*" capture="environment" id="phCapture" hidden />
+      </div>
+    </section>
+
+    <section data-step="camera" class="ph-step hidden">
+      <div class="ph-cam">
+        <video playsinline muted></video>
+        <svg class="ph-frame" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
+          <polygon points="24,14 76,14 95,52 5,52" fill="none" stroke="#f5b942" stroke-width=".6" stroke-dasharray="2 1.5"/>
+        </svg>
+        <p class="ph-cam-tip">노란 틀에 테이블 네 코너를 대략 맞춰 주세요</p>
+      </div>
+      <button id="phShoot" class="primary ph-shoot">촬영</button>
+    </section>
+
+    <section data-step="corners" class="ph-step hidden">
+      <p class="ph-msg">원 4개를 <b>천과 쿠션이 만나는 안쪽 모서리</b>에 맞춰 끌어 주세요. 끌면 확대경이 나오고, 손가락보다 천천히 움직여 정밀하게 맞출 수 있어요.</p>
+      <div class="ph-stage"><canvas id="phCanvas"></canvas></div>
+      <button id="phCornersOk" class="primary">다음: 공 위치 확인</button>
+    </section>
+
+    <section data-step="balls" class="ph-step hidden">
+      <p class="ph-msg">위에서 본 모습으로 펼쳤습니다. 공 표시가 실제 공과 다르면 끌어서 맞춰 주세요.</p>
+      <div class="ph-stage"><canvas id="phTop"></canvas></div>
+      <p id="phQuality" class="ph-msg"></p>
+      <div class="ph-actions"><button id="phBack">← 코너 다시</button><button id="phApply" class="primary">이 배치 적용</button></div>
+    </section>
+  </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

@@ -1,11 +1,13 @@
 import './style.css';
 import {
-  BALL, BALL_IDS, DIAMOND, KO, PHYS, TABLE, WALL_KO, simulate,
-  type BallId, type Layout, type Pos, type Shot, type SimResult, type Wall,
+  BALL, BALL_IDS, DIAMOND, KO, PHYS, SKILL, TABLE, WALL_KO, setTableSpeed, simulate,
+  type BallId, type Layout, type Pos, type Shot, type SimResult, type Skill, type TableSpeed, type Wall,
 } from './physics';
 import { calibrate, railPoint, solveSystem, type SystemResult } from './systems';
-import { findRanges, type ScanRange } from './ranges';
+import type { ScanRange } from './ranges';
 import type { ShotSummary, WorkerRequest, WorkerResponse } from './worker';
+import { initPhoto } from './photo';
+import { LEVEL_KO, difficulty, howTo, pattern, powerLevel, thicknessText, tipClock, type Difficulty } from './analysis';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const R = BALL.R;
@@ -23,7 +25,10 @@ let shot: Shot = { cue: 'white', angleDeg: 6, speed: 3.2, tipX: 0.3, tipY: 0.2 }
 let result: SimResult;
 let prob: number | null = null;
 let sysRes: SystemResult | null = null;
-interface Candidate extends ScanRange { tipX: number; tipY: number; speed: number; prob: number; summary?: ShotSummary }
+interface Candidate extends ScanRange {
+  tipX: number; tipY: number; speed: number; prob: number; score: number;
+  summary?: ShotSummary; diff?: Difficulty; pat?: { key: string; label: string }; pending?: boolean;
+}
 let candidates: Candidate[] = [];
 let selected = -1; // 현재 적용된 추천 후보
 let anim: { start: number; rate: number } | null = null;
@@ -45,12 +50,12 @@ function requestProb() {
   clearTimeout(probTimer);
   probTimer = window.setTimeout(() => {
     probId = ++reqId;
-    probe.postMessage({ kind: 'eval', id: probId, layout, shot, n: 40 } satisfies WorkerRequest);
+    probe.postMessage({ kind: 'eval', id: probId, layout, shot, width: -1, n: 40, err: SKILL[prefs.skill as Skill], table: prefs.table } satisfies WorkerRequest);
   }, 200);
 }
 
 // 작업 여러 개를 코어 수만큼 워커에 나눠 실행. cancel() 시 워커를 종료하고 결과는 버린다
-function runPool<T extends WorkerResponse>(reqs: WorkerRequest[], onProgress: (p: number) => void) {
+function runPool<T extends WorkerResponse>(reqs: WorkerRequest[], onProgress: (p: number) => void, onResult?: (i: number, r: T) => void) {
   const n = Math.max(1, Math.min(reqs.length, (navigator.hardwareConcurrency || 4) - 1, 8));
   const workers = Array.from({ length: n }, newWorker);
   const results: T[] = new Array(reqs.length);
@@ -67,6 +72,7 @@ function runPool<T extends WorkerResponse>(reqs: WorkerRequest[], onProgress: (p
         if (m.kind === 'progress') prog[i] = m.value;
         else {
           results[i] = m as T; prog[i] = 1; done++;
+          onResult?.(i, m as T);
           if (done === reqs.length) { workers.forEach((x) => x.terminate()); resolve(results); }
           else assign(w);
         }
@@ -271,6 +277,26 @@ function drawPrediction(showOthers: boolean) {
     ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
     circle(x, y, Math.max(R * S * 3, 26)); ctx.stroke(); ctx.setLineDash([]);
   }
+  if (loupe) drawLoupe(loupe.x, loupe.y, loupe.id);
+}
+
+// 돋보기: 손가락에 가려지는 부분을 2.5배로 확대해 구석에 표시 + 좌표(다이아몬드)
+let loupe: { x: number; y: number; id: BallId } | null = null;
+function drawLoupe(sx: number, sy: number, id: BallId) {
+  const r = 54, zoom = 2.5, dpr = devicePixelRatio || 1, W = cv.clientWidth;
+  const cx = sx < W / 2 ? W - r - 12 : r + 12, cy = r + 12;
+  const src = r / zoom;
+  ctx.save();
+  circle(cx, cy, r); ctx.clip();
+  ctx.drawImage(cv, (sx - src) * dpr, (sy - src) * dpr, 2 * src * dpr, 2 * src * dpr, cx - r, cy - r, 2 * r, 2 * r);
+  ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1;
+  line([cx - 10, cy], [cx + 10, cy]); line([cx, cy - 10], [cx, cy + 10]);
+  ctx.restore();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; circle(cx, cy, r); ctx.stroke();
+  const p = layout[id];
+  ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(cx - 44, cy + r + 4, 88, 20);
+  ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(`${(p.x / DIAMOND).toFixed(2)} , ${(p.y / DIAMOND).toFixed(2)}`, cx, cy + r + 14);
 }
 
 function drawAnim(showOthers: boolean) {
@@ -359,6 +385,19 @@ cv.addEventListener('pointerdown', (ev) => {
   if (anim) { anim = null; draw(); }
   const [sx, sy] = screenPos(ev);
   const p = toTable(sx, sy);
+  if (placeMode && !dispute) {
+    // 탭 배치 모드: 고른 공을 탭한 자리에 놓고 다음 공으로
+    placeBall(placeMode, snapPos(p));
+    loupe = { x: sx, y: sy, id: placeMode };
+    setTimeout(() => { loupe = null; draw(); }, 700);
+    const order: BallId[] = ['white', 'yellow', 'red'];
+    const next = order[order.indexOf(placeMode) + 1];
+    placedSinceStart = true;
+    saveHistory();
+    setPlaceMode(next ?? null);
+    recompute();
+    return;
+  }
   const hitR = Math.max(R * S * 1.8, ev.pointerType === 'touch' ? 26 : 12);
   let hit: BallId | undefined, best = Infinity;
   for (const id of BALL_IDS) {
@@ -384,7 +423,9 @@ cv.addEventListener('pointermove', (ev) => {
     if (locked || dispute) { drag = { kind: 'aim' }; interacting = true; aimAt(p); return; }
     drag.moved = true;
     interacting = true;
-    placeBall(drag.id, { x: drag.from.x + p.x - drag.p0.x, y: drag.from.y + p.y - drag.p0.y });
+    placeBall(drag.id, snapPos({ x: drag.from.x + p.x - drag.p0.x, y: drag.from.y + p.y - drag.p0.y }));
+    const [lx, ly] = px(layout[drag.id]);
+    loupe = { x: lx, y: ly, id: drag.id };
     sysRes = null;
     recompute();
   } else aimAt(p);
@@ -398,6 +439,7 @@ function endDrag() {
   }
   const movedBall = drag.kind === 'ball' && drag.moved;
   drag = null;
+  loupe = null;
   if (movedBall) layoutChanged();
   interacting = false;
   recompute();
@@ -603,7 +645,7 @@ function renderDetail() {
       <span>총 시간</span><span>${result.duration.toFixed(1)}초</span>
       <span>성공 확률</span><span>${probHtml}</span>
     </div>
-    <p class="note">성공 확률 = 방향 ±0.35°, 힘 ±5%, 당점 ±0.05R 의 스트로크 오차를 가정한 40회 시뮬레이션</p>
+    <p class="note">성공 확률 = ${SKILL[prefs.skill as Skill].label} 기준 스트로크 오차(방향 ±${SKILL[prefs.skill as Skill].angle}°, 힘 ±${Math.round(SKILL[prefs.skill as Skill].speed * 100)}%)로 40회 시뮬레이션</p>
     <ol class="events">${cueEvents.slice(0, 14).map((e) => `<li class="cue">${e.t.toFixed(2)}s · ${
       e.type === 'cushion' ? `${WALL_KO[e.wall!]} (${posTxt(e)})` : `${KO[ballOf(e)!]} 접촉`
     } · ${e.speed.toFixed(2)}m/s</li>`).join('')}</ol>`;
@@ -611,26 +653,46 @@ function renderDetail() {
 const posTxt = (p: Pos) => `${(p.x / DIAMOND).toFixed(1)}, ${(p.y / DIAMOND).toFixed(1)}`;
 
 // ───────── 추천 샷 (메인 기능) ─────────
-// 1) 여러 힘·당점 조합으로 360° 전 방향을 병렬 시뮬레이션 → 득점 각도 구간 수집
-// 2) 구간이 넓은 상위 후보를 스트로크 오차 30회로 재평가 → 성공 확률 순 정렬
+// 1) 여러 힘·당점 조합으로 360° 를 병렬 탐색 (1° → 득점/아까운 방향만 0.2°) — 조합 하나 끝날 때마다 바로 표시
+// 2) 각도 허용폭이 넓은 후보를 실력 단계 오차로 성공 확률 계산 + 정밀 검증
+// 3) 순위 = 성공 확률 − 난이도 벌점, 경로 형태별 대표를 우선 보여줘 비슷한 샷만 나오지 않게
 const MODES = {
-  fast: [
-    ...[-0.3, 0, 0.3].map((tipX) => ({ tipX, tipY: 0.2, speed: 3.0 })),
-    ...[-0.3, 0.3].map((tipX) => ({ tipX, tipY: 0.2, speed: 4.2 })),
-  ],
+  fast: [-0.3, 0, 0.3].flatMap((tipX) => [2.6, 3.4].map((speed) => ({ tipX, tipY: 0.2, speed }))),
   fine: [
-    ...[-0.4, -0.2, 0, 0.2, 0.4].flatMap((tipX) => [2.2, 3.0, 4.2].map((speed) => ({ tipX, tipY: 0.2, speed }))),
-    ...[-0.3, 0.3].map((tipX) => ({ tipX, tipY: -0.3, speed: 3.4 })),
+    ...[-0.4, -0.2, 0, 0.2, 0.4].flatMap((tipX) => [2.2, 3.0, 3.8].map((speed) => ({ tipX, tipY: 0.2, speed }))),
+    ...[-0.3, 0.3].map((tipX) => ({ tipX, tipY: -0.3, speed: 3.2 })),
+    { tipX: 0, tipY: 0.4, speed: 2.8 },
   ],
 };
 let recMode: keyof typeof MODES = 'fast';
 let searchGen = 0;
 let activeSearch: { cancel(): void } | null = null;
 
+// 사용자 설정 (이 기기에 저장)
+const prefs = (() => {
+  const def = { skill: 'intermediate' as Skill, table: 'normal' as TableSpeed, easyFirst: true };
+  try { return { ...def, ...JSON.parse(localStorage.getItem('miriq.prefs') || '{}') }; } catch { return def; }
+})();
+const savePrefs = () => { try { localStorage.setItem('miriq.prefs', JSON.stringify(prefs)); } catch { /* 저장 불가 */ } };
+setTableSpeed(prefs.table);
+
 function setProgress(p: number | null, text = '') {
   $('progress').classList.toggle('hidden', p === null);
   if (p !== null) ($('progress').firstElementChild as HTMLElement).style.width = `${p * 100}%`;
   $('recStatus').innerHTML = text;
+}
+
+function rankCandidates(list: Candidate[]) {
+  const w = prefs.easyFirst ? 0.75 : 0.25;
+  for (const c of list) c.score = c.prob * 100 - w * (c.diff?.score ?? 0);
+  list.sort((a, b) => b.score - a.score);
+  // 경로 형태별 최고 1개씩 먼저, 나머지는 점수 순
+  const picked: Candidate[] = [], seen = new Set<string>();
+  for (const c of list) if (c.pat && !seen.has(c.pat.key)) { seen.add(c.pat.key); picked.push(c); }
+  for (const c of list) if (!picked.includes(c)) picked.push(c);
+  // 성공 확률이 너무 낮은 후보는 다른 후보가 충분하면 제외
+  const good = picked.filter((c) => c.prob >= 0.05);
+  return (good.length >= 3 ? good : picked).slice(0, 6).sort((a, b) => b.score - a.score);
 }
 
 async function recommend() {
@@ -641,46 +703,45 @@ async function recommend() {
   candidates = []; renderCands();
   const variants = MODES[recMode];
   const t0 = performance.now();
-  setProgress(0, `득점 경로 탐색 중… (${variants.length}가지 힘·당점 × 900방향)`);
-  // 힘·당점 조합마다 360°를 4조각으로 나눠 코어에 고르게 분배
-  const STEP = 0.4, N = Math.round(360 / STEP), CHUNKS = 4;
-  const jobs = variants.flatMap((v, vi) => Array.from({ length: CHUNKS }, (_, c) => ({
-    vi, req: { kind: 'scan', id: 0, layout: lay, shot: { ...base, ...v }, step: STEP,
-      from: Math.floor((c * N) / CHUNKS), to: Math.floor(((c + 1) * N) / CHUNKS) } as WorkerRequest,
-  })));
+  setProgress(0, `득점 경로 탐색 중… (${variants.length}가지 힘·당점)`);
+  let found: Candidate[] = [];
   const scan = runPool<Extract<WorkerResponse, { kind: 'scan' }>>(
-    jobs.map((j) => j.req),
-    (p) => { if (gen === searchGen) setProgress(p * 0.8, `득점 경로 탐색 중… ${Math.round(p * 100)}%`); },
+    variants.map((v) => ({ kind: 'scan', id: 0, layout: lay, shot: { ...base, ...v }, table: prefs.table })),
+    (p) => { if (gen === searchGen) setProgress(p * 0.75, `득점 경로 탐색 중… ${Math.round(p * 100)}%${found.length ? ` · 후보 ${found.length}개 발견` : ''}`); },
+    (i, r) => {
+      if (gen !== searchGen) return;
+      found = found.concat(r.ranges.map((g) => ({ ...g, ...variants[i], prob: 0, score: 0, pending: true })));
+      // 확률 계산 전 임시 표시 (허용폭 순)
+      candidates = [...found].sort((a, b) => b.width - a.width).slice(0, 6);
+      renderCands();
+    },
   );
   activeSearch = scan;
-  const scans = await scan.promise;
+  await scan.promise;
   if (gen !== searchGen) return;
-  const okAll = variants.map(() => new Uint8Array(N));
-  scans.forEach((r, k) => okAll[jobs[k].vi].set(r.ok, (jobs[k].req as { from: number }).from));
-  let cands: Candidate[] = okAll.flatMap((ok, vi) => findRanges(ok, STEP).map((g) => ({ ...g, ...variants[vi], prob: 0 })));
-  cands.sort((a, b) => b.width - a.width);
-  cands = cands.slice(0, 14);
+  const top = [...found].sort((a, b) => b.width - a.width).slice(0, 16);
+  const err = SKILL[prefs.skill as Skill];
   const ev = runPool<Extract<WorkerResponse, { kind: 'eval' }>>(
-    cands.map((c) => ({ kind: 'eval', id: 0, layout: lay, shot: { ...base, ...c }, n: 30 })),
-    (p) => { if (gen === searchGen) setProgress(0.8 + p * 0.2, '성공 확률 계산 중…'); },
+    top.map((c) => ({ kind: 'eval', id: 0, layout: lay, shot: { ...base, ...c }, width: c.width, n: 30, err, table: prefs.table })),
+    (p) => { if (gen === searchGen) setProgress(0.75 + p * 0.25, `${SKILL[prefs.skill as Skill].label} 기준 성공 확률 계산 중…`); },
   );
   activeSearch = ev;
   const evals = await ev.promise;
   if (gen !== searchGen) return;
-  cands.forEach((c, i) => { c.prob = evals[i].prob; c.summary = evals[i].summary; });
-  cands.sort((a, b) => b.prob - a.prob || b.width - a.width);
-  // 거의 같은 샷(각도 1° 이내, 같은 당점·힘) 중복 제거
-  const kept: Candidate[] = [];
-  for (const c of cands) {
-    if (kept.some((k) => Math.abs(k.angleDeg - c.angleDeg) < 1 && k.tipX === c.tipX && k.speed === c.speed)) continue;
-    kept.push(c);
-    if (kept.length === 6) break;
-  }
-  candidates = kept;
+  const scored: Candidate[] = [];
+  top.forEach((c, i) => {
+    const e = evals[i];
+    if (!e.verified) return; // 정밀 시뮬레이션에서 득점이 확인되지 않은 후보는 제외
+    const shotC = { ...base, ...c, angleDeg: e.angleDeg };
+    scored.push({ ...c, angleDeg: e.angleDeg, prob: e.prob, summary: e.summary, pending: false, score: 0,
+      diff: difficulty(lay, shotC, e.summary), pat: pattern(e.summary) });
+  });
+  candidates = rankCandidates(scored);
   activeSearch = null;
+  renderCands();
   const sec = ((performance.now() - t0) / 1000).toFixed(1);
   setProgress(null, candidates.length
-    ? `득점 가능한 샷 ${candidates.length}개 · ${sec}초 · 카드를 탭하면 경로 표시, 한 번 더 탭하면 재생`
+    ? `득점 샷 ${candidates.length}개 · ${sec}초 · 카드를 탭하면 경로, 한 번 더 탭하면 재생`
     : `득점 경로를 찾지 못했습니다${recMode === 'fast' ? ' — <b>정밀</b> 모드로 다시 시도해 보세요' : ''}`);
   $('disputeBtn').classList.remove('hidden');
   if (candidates.length) applyCandidate(0);
@@ -693,6 +754,7 @@ function layoutChanged() {
   $('disputeBtn').classList.add('hidden');
   candidates = []; lastApplied = -1; renderCands();
   clearTimeout(recTimer);
+  saveHistory();
   if (!($('autoRec') as HTMLInputElement).checked) { setProgress(null, '배치가 바뀌었습니다. <b>추천 받기</b>를 눌러 주세요.'); return; }
   setProgress(null, '배치 변경 — 곧 추천을 시작합니다');
   recTimer = window.setTimeout(recommend, 450);
@@ -710,10 +772,7 @@ const currentCand = () => candidates.findIndex((c) =>
   c.angleDeg === shot.angleDeg && c.speed === shot.speed && c.tipX === shot.tipX && c.tipY === shot.tipY);
 
 const WALL_SHORT: Record<Wall, string> = { top: '상', bottom: '하', left: '좌', right: '우' };
-function thicknessText(t: number) {
-  const k = Math.max(1, Math.round(t * 8));
-  return k >= 8 ? '정면' : ['', '1/8', '1/4', '3/8', '1/2', '5/8', '3/4', '7/8'][k] + ' 두께';
-}
+const thickLabel = (t: number) => (t >= 0.94 ? '정면' : `${thicknessText(t)} 두께`);
 function tipIcon(tx: number, ty: number) {
   const x = 12 + tx * 10, y = 12 - ty * 10;
   return `<svg class="tipico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10.5"/><circle class="d" cx="${x}" cy="${y}" r="2.6"/></svg>`;
@@ -728,28 +787,36 @@ function renderCands() {
   const cur = currentCand();
   ol.innerHTML = candidates.map((c, i) => {
     const s = c.summary;
+    const dot = (id: BallId) => `<span class="ball-dot" style="background:${COLORS[id]}"></span>${KO[id]}`;
+    if (c.pending) {
+      return `<li class="card pending" data-i="${i}"><div class="card-top"><span class="rank">…</span>
+        <span class="note">확률 계산 중 · 허용폭 ${c.width.toFixed(1)}°</span></div>
+        <div class="params">${tipIcon(c.tipX, c.tipY)} ${tipClock(c.tipX, c.tipY)} · 힘 ${powerLevel(c.speed)}/5</div></li>`;
+    }
     const pct = Math.round(c.prob * 100);
     const color = c.prob > 0.6 ? 'var(--ok)' : c.prob > 0.3 ? 'var(--warn)' : 'var(--fail)';
-    const dot = (id: BallId) => `<span class="ball-dot" style="background:${COLORS[id]}"></span>${KO[id]}`;
-    const route = s?.firstHit
-      ? `${dot(s.firstHit)}${s.thickness !== undefined ? ` <i>${thicknessText(s.thickness)}</i>` : ' <i>(쿠션 먼저)</i>'}
-         → ${s.cushions.map((w) => WALL_SHORT[w]).join('·') || '—'} → ${s.secondHit ? dot(s.secondHit) : '—'}`
-      : '';
+    const h = howTo({ ...shot, ...c }, s);
+    const route = s?.firstHit ? `${dot(s.firstHit)} → ${s.cushions.map((w) => WALL_SHORT[w]).join('·') || '—'} → ${s.secondHit ? dot(s.secondHit) : '—'}` : '';
+    const lv = c.diff?.level ?? 'normal';
     return `<li class="card${i === cur ? ' on' : ''}" data-i="${i}">
       <div class="card-top"><span class="rank">${i + 1}</span>
-        <div class="prob"><b style="color:${color}">${pct}%</b><div class="bar"><div style="width:${pct}%;background:${color}"></div></div></div>
-        ${i === cur ? '<span class="tag">적용됨 · 탭=재생</span>' : ''}</div>
+        <span class="lv lv-${lv}">${LEVEL_KO[lv]}</span><span class="pat">${c.pat?.label ?? ''}</span>
+        <b class="pct" style="color:${color}">${pct}%</b></div>
+      <div class="how"><b>${h.aim}</b> · ${tipIcon(c.tipX, c.tipY)} ${h.tip} · ${h.power}</div>
       <div class="route">${route}${s?.kiss ? ' <span class="kiss">키스 주의</span>' : ''}</div>
-      <div class="params">${tipIcon(c.tipX, c.tipY)} ${tipLabel(c.tipX, c.tipY)} · 힘 ${c.speed.toFixed(1)} · ${c.angleDeg.toFixed(1)}° <span class="note">(허용폭 ${c.width.toFixed(1)}°)</span></div>
+      ${c.diff && c.diff.reasons.length ? `<div class="note">까다로운 점: ${c.diff.reasons.slice(0, 3).join(', ')}</div>` : ''}
+      ${i === cur ? '<div class="tag">적용됨 · 한 번 더 탭하면 재생</div>' : ''}
     </li>`;
   }).join('');
   ol.querySelectorAll<HTMLElement>('.card').forEach((li) => li.addEventListener('click', () => {
     const i = +li.dataset.i!;
+    if (candidates[i]?.pending) return;
     if (i === currentCand()) { closeDrawer(); startAnim(); return; } // 이미 적용된 카드를 다시 탭하면 재생
     applyCandidate(i);
     closeDrawer(); // 와이드 모드: 테이블 전체로 경로 확인
   }));
   renderHud();
+  renderStats();
 }
 $('recBtn').addEventListener('click', () => { clearTimeout(recTimer); recommend(); });
 $('recMode').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
@@ -757,6 +824,20 @@ $('recMode').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addE
   $('recMode').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
   clearTimeout(recTimer); recommend();
 }));
+// 설정: 실력 단계 · 테이블 상태 · 쉬운 샷 우선
+function bindSeg(id: string, key: 'skill' | 'table', after: () => void) {
+  const btns = $(id).querySelectorAll<HTMLButtonElement>('button');
+  const sync = () => btns.forEach((x) => x.classList.toggle('on', x.dataset.v === prefs[key]));
+  btns.forEach((b) => b.addEventListener('click', () => { (prefs as Record<string, unknown>)[key] = b.dataset.v; savePrefs(); sync(); after(); }));
+  sync();
+}
+bindSeg('skillSel', 'skill', () => { clearTimeout(recTimer); recommend(); requestProb(); });
+bindSeg('tableSel', 'table', () => { setTableSpeed(prefs.table); recompute(); clearTimeout(recTimer); recommend(); });
+($('easyFirst') as HTMLInputElement).checked = prefs.easyFirst;
+$('easyFirst').addEventListener('change', () => {
+  prefs.easyFirst = ($('easyFirst') as HTMLInputElement).checked; savePrefs();
+  if (candidates.length && !candidates[0].pending) { candidates = rankCandidates(candidates); applyCandidate(0); }
+});
 
 // ───────── 재생 ─────────
 function startAnim() {
@@ -828,7 +909,7 @@ function clientId() {
 
 function setDisputeLocks(on: boolean) {
   document.body.classList.toggle('disputing', on);
-  [sections[1], tabBtns[1], $('recBtn'), $('recMode'), $('lock'), $('disputeBtn')].forEach((el) => el.classList.toggle('lock-hide', on));
+  [sections[1], document.querySelector<HTMLElement>('#tabs [data-tab="1"]')!, $('recBtn'), $('recMode'), $('lock'), $('disputeBtn')].forEach((el) => el.classList.toggle('lock-hide', on));
 }
 function startDispute() {
   const cur = currentCand();
@@ -978,7 +1059,7 @@ function renderHud() {
   const cur = currentCand();
   const c = candidates[Math.max(0, cur)];
   const s = c.summary;
-  const route = s?.firstHit ? ` · ${KO[s.firstHit]}${s.thickness !== undefined ? ` ${thicknessText(s.thickness)}` : ''} → ${s.cushions.map((w) => WALL_SHORT[w]).join('·')} → ${s.secondHit ? KO[s.secondHit] : '—'}` : '';
+  const route = s?.firstHit ? ` · ${KO[s.firstHit]}${s.thickness !== undefined ? ` ${thickLabel(s.thickness)}` : ''} → ${s.cushions.map((w) => WALL_SHORT[w]).join('·')} → ${s.secondHit ? KO[s.secondHit] : '—'}` : '';
   $('hudRecTxt').innerHTML = cur >= 0
     ? `추천 ${cur + 1}/${candidates.length} · <span class="r-prob">${Math.round(c.prob * 100)}%</span>${route}`
     : `추천 ${candidates.length}개 · ◀▶로 보기`;
@@ -991,6 +1072,103 @@ const stepCand = (d: number) => {
 $('hudPrev').addEventListener('click', () => stepCand(-1));
 $('hudNext').addEventListener('click', () => stepCand(1));
 
+// ───────── 배치 입력 도구: 탭 배치 · 격자 맞춤 · 되돌리기 · 공유 링크 ─────────
+let placeMode: BallId | null = null;
+let placedSinceStart = false;
+function setPlaceMode(id: BallId | null) {
+  // 탭 배치를 마치거나 중간에 끄면 그때 한 번 추천 시작
+  if (!id && placedSinceStart) { placedSinceStart = false; layoutChanged(); }
+  placeMode = id;
+  $('placeSel').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('placing', b.dataset.v === id));
+  $('placeHint').innerHTML = id
+    ? `<b style="color:var(--warn)">${KO[id]}</b> 위치를 테이블에서 탭하세요`
+    : '공을 고른 뒤 테이블을 탭하면 그 자리에 놓입니다 (흰공 → 노란공 → 빨간공 순서로 자동 진행)';
+  if (id && document.body.classList.contains('wide')) closeDrawer();
+}
+$('placeSel').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
+  setPlaceMode(placeMode === b.dataset.v ? null : (b.dataset.v as BallId));
+}));
+function snapPos(p: Pos): Pos {
+  if (!($('snap') as HTMLInputElement).checked) return p;
+  const g = DIAMOND / 4;
+  return { x: Math.round(p.x / g) * g, y: Math.round(p.y / g) * g };
+}
+
+// 배치 이력 (되돌리기/다시) + 주소에 배치 저장 (공유·새로고침 유지)
+const layoutHist: string[] = [];
+let histIdx = -1;
+const snapshot = () => JSON.stringify({ layout, cue: shot.cue });
+function saveHistory() {
+  const snap = snapshot();
+  if (layoutHist[histIdx] === snap) return;
+  layoutHist.splice(histIdx + 1);
+  layoutHist.push(snap);
+  if (layoutHist.length > 60) layoutHist.shift();
+  histIdx = layoutHist.length - 1;
+  updateHistButtons();
+  try { history.replaceState(null, '', `#l=${encodeLayout()}`); } catch { /* 무시 */ }
+}
+function restoreHistory(i: number) {
+  if (i < 0 || i >= layoutHist.length) return;
+  histIdx = i;
+  const v = JSON.parse(layoutHist[i]);
+  layout = v.layout; shot.cue = v.cue;
+  updateHistButtons();
+  recompute();
+  layoutChanged();
+}
+function updateHistButtons() {
+  ($('undoBtn') as HTMLButtonElement).disabled = histIdx <= 0;
+  ($('redoBtn') as HTMLButtonElement).disabled = histIdx >= layoutHist.length - 1;
+}
+$('undoBtn').addEventListener('click', () => { if (!dispute) restoreHistory(histIdx - 1); });
+$('redoBtn').addEventListener('click', () => { if (!dispute) restoreHistory(histIdx + 1); });
+
+function encodeLayout() {
+  const n = BALL_IDS.flatMap((id) => [layout[id].x, layout[id].y]).map((v) => Math.round((v / DIAMOND) * 100));
+  return [...n, shot.cue[0]].join('.');
+}
+function loadFromHash() {
+  const m = location.hash.match(/l=([\d.]+)\.([wy])/);
+  if (!m) return false;
+  const n = m[1].split('.').map(Number);
+  if (n.length !== 6 || n.some((v) => !Number.isFinite(v))) return false;
+  BALL_IDS.forEach((id, i) => placeBall(id, { x: (n[i * 2] / 100) * DIAMOND, y: (n[i * 2 + 1] / 100) * DIAMOND }));
+  shot.cue = m[2] === 'y' ? 'yellow' : 'white';
+  return true;
+}
+$('shareBtn').addEventListener('click', async () => {
+  const url = `${location.origin}${location.pathname}#l=${encodeLayout()}`;
+  try {
+    if (navigator.share) await navigator.share({ title: '미리Q 배치', url });
+    else { await navigator.clipboard.writeText(url); $('placeHint').textContent = '배치 링크를 복사했습니다'; }
+  } catch { /* 취소 */ }
+});
+
+// ───────── 친 결과 기록 (이 기기에 저장 · 추후 서버 동기화) ─────────
+interface ShotRecord { ts: string; layout: Layout; shot: Shot; rank: number; level?: string; prob: number; result: 'scored' | 'missed'; skill: string }
+const RECORDS_KEY = 'miriq.records';
+const loadRecords = (): ShotRecord[] => { try { return JSON.parse(localStorage.getItem(RECORDS_KEY) || '[]'); } catch { return []; } };
+function renderStats() {
+  const recs = loadRecords();
+  $('logBox').classList.toggle('hidden', currentCand() < 0 || !!dispute);
+  if (!recs.length) { $('statsNote').textContent = ''; return; }
+  const ok = recs.filter((r) => r.result === 'scored').length;
+  const by = (lv: string) => { const a = recs.filter((r) => r.level === lv); return a.length ? ` · ${LEVEL_KO[lv as 'easy']} ${a.filter((r) => r.result === 'scored').length}/${a.length}` : ''; };
+  $('statsNote').textContent = `내 기록: ${recs.length}회 중 ${ok}회 득점 (${Math.round((ok / recs.length) * 100)}%)${by('easy')}${by('normal')}${by('hard')}`;
+}
+$('logBox').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
+  const i = currentCand();
+  if (i < 0) return;
+  const c = candidates[i];
+  const recs = loadRecords();
+  recs.push({ ts: new Date().toISOString(), layout: clone(layout), shot: { ...shot }, rank: i, level: c.diff?.level, prob: c.prob, result: b.dataset.r as 'scored' | 'missed', skill: prefs.skill });
+  try { localStorage.setItem(RECORDS_KEY, JSON.stringify(recs.slice(-500))); } catch { /* 저장 불가 */ }
+  $('logMsg').textContent = b.dataset.r === 'scored' ? '기록했습니다 👏' : '기록했습니다';
+  setTimeout(() => { $('logMsg').textContent = ''; }, 1500);
+  renderStats();
+}));
+
 // ───────── 시작 ─────────
 // ───────── 모바일 탭 ─────────
 const tabBtns = [...document.querySelectorAll<HTMLButtonElement>('#tabs button')];
@@ -1001,7 +1179,7 @@ function selectTab(i: number) {
   activeTab = i;
   $('drawerTitle').textContent = dispute && i === 2 ? '⚑ 이의제기' : TAB_TITLES[i];
   if (document.body.classList.contains('wide')) openDrawer();
-  tabBtns.forEach((x, j) => x.classList.toggle('on', j === i));
+  tabBtns.forEach((x) => x.classList.toggle('on', +x.dataset.tab! === i));
   sections.forEach((d, j) => { d.classList.toggle('active', j === i); if (j === i) d.open = true; });
   $('panel').scrollTop = 0;
 }
@@ -1025,8 +1203,11 @@ function applyMode() {
   lastBox = '';
   resize();
 }
+// 안드로이드 앱(미리Q) 안에서는 네이티브로 화면 방향을 바꾼다
+const nativeApp = (window as unknown as { MiriQApp?: { setOrientation(mode: string): void } }).MiriQApp;
 wideBtn.addEventListener('click', async () => {
   wideMode = !wideMode;
+  if (nativeApp) { nativeApp.setOrientation(wideMode ? 'landscape' : 'auto'); applyMode(); return; }
   // 안드로이드 등 지원 기기: 전체화면 + 가로 고정으로 진짜 회전. 미지원(iOS)이면 CSS 회전으로 대체
   try {
     if (wideMode) {
@@ -1045,6 +1226,17 @@ document.addEventListener('fullscreenchange', () => {
 [mobileMq, landscapeMq, portraitMq].forEach((mq) => mq.addEventListener('change', applyMode));
 applyMode();
 addEventListener('resize', resize);
+// 사진으로 배치 입력 → 적용하면 바로 추천
+initPhoto((l) => {
+  if (dispute) return;
+  BALL_IDS.forEach((id) => placeBall(id, l[id]));
+  recompute();
+  layoutChanged();
+  selectTab(0);
+});
+
+loadFromHash();
+saveHistory();
 recompute();
 recommend();
 renderQueueNote();

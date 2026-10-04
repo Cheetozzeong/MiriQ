@@ -210,7 +210,7 @@ body.rotated .layout {
 .card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; }
 .card:hover { border-color: #46566a; }
 .card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-.card-top { display: flex; align-items: center; gap: 10px; }
+.card-top { display: flex; align-items: center; gap: 8px; }
 .rank { width: 24px; height: 24px; flex: none; border-radius: 50%; background: var(--line); display: grid; place-items: center; font-weight: 700; font-size: 13px; }
 .card.on .rank { background: var(--accent); color: #fff; }
 .prob { flex: 1; display: flex; align-items: center; gap: 8px; }
@@ -248,3 +248,51 @@ body.rotated .layout {
 body.disputing #stage { outline: 2px solid var(--warn); outline-offset: 2px; border-radius: 16px; }
 body.disputing .lock-hide { opacity: .4; pointer-events: none; }
 @media (min-width: 961px) { #dComment { font-size: 14px; } }
+
+/* ───────── 추천 설정 · 카드 확장 ───────── */
+.rec-opts { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin: 6px 0; }
+.rec-opts .opt { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.seg.sm button { padding: 3px 9px; font-size: 12.5px; min-height: 30px; }
+.lv { font-size: 11px; font-weight: 700; border-radius: 6px; padding: 2px 6px; white-space: nowrap; }
+.lv-easy { background: #163d27; color: var(--ok); }
+.lv-normal { background: #3a3114; color: var(--warn); }
+.lv-hard { background: #401c1c; color: var(--fail); }
+.pat { flex: 1; min-width: 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pct { font-size: 17px; font-variant-numeric: tabular-nums; }
+.how { margin-top: 6px; font-size: 13.5px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.how b { color: var(--text); }
+.card.pending { opacity: .65; cursor: default; }
+.card .tag { margin-top: 4px; }
+.log-box { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
+.log-box button { padding: 5px 12px; }
+.log-ok { border-color: var(--ok) !important; color: var(--ok); }
+.log-miss { border-color: var(--fail) !important; color: var(--fail); }
+.photo-btn { width: 100%; height: 44px; margin: 6px 0 8px; font-size: 15px; }
+.place-tools { display: flex; align-items: center; gap: 8px; }
+.seg button.placing { background: var(--warn); color: #1b1606; font-weight: 700; }
+
+/* ───────── 사진으로 배치 입력 ───────── */
+.photo { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; padding: env(safe-area-inset-top) 12px env(safe-area-inset-bottom); }
+.photo.hidden { display: none; }
+body.photo-open { overflow: hidden; }
+.ph-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; }
+.ph-head button { width: 40px; height: 40px; padding: 0; }
+.ph-step { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-bottom: 12px; }
+.ph-step.hidden { display: none; }
+.ph-illust { width: 100%; max-width: 420px; align-self: center; }
+.ph-tips { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.ph-tips b { color: var(--warn); }
+.ph-side { display: flex; gap: 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.ph-side label { color: var(--text); display: inline-flex; gap: 4px; align-items: center; }
+.ph-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ph-actions > * { flex: 1; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+.file-btn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 15px; }
+.ph-cam { position: relative; flex: 1; min-height: 0; background: #000; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.ph-cam video { width: 100%; height: 100%; object-fit: contain; }
+.ph-frame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.ph-cam-tip { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); margin: 0; background: rgba(0,0,0,.6); padding: 4px 10px; border-radius: 8px; font-size: 13px; white-space: nowrap; }
+.ph-shoot { height: 56px; font-size: 17px; }
+.ph-msg { margin: 0; font-size: 13.5px; color: var(--muted); }
+.ph-msg b { color: var(--text); }
+.ph-stage { flex: 1; min-height: 220px; display: flex; align-items: center; justify-content: center; }
+.ph-stage canvas { touch-action: none; border-radius: 8px; }
