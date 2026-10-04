@@ -64,6 +64,11 @@
       <div class="drawer-head"><b id="drawerTitle"></b><button id="drawerClose" aria-label="닫기">✕</button></div>
       <details open class="active rec">
         <summary>★ 추천 샷</summary>
+        <div class="first-row">
+          <span class="lbl">1적구</span>
+          <div class="seg sm" id="firstSel"></div>
+          <span class="note" id="firstNote"></span>
+        </div>
         <div class="rec-head">
           <button id="recBtn" class="primary big">⟳ 추천 받기</button>
           <div class="seg" id="recMode" title="빠름: 당점 3종 · 정밀: 당점·힘·끌어치기 조합 17종">
@@ -176,6 +181,15 @@
 
       <details>
         <summary>③ 다이아몬드 시스템</summary>
+        <div class="sys-help">
+          <b>쿠션 경로를 포인트(다이아몬드)로 계산하는 도구</b>
+          <p>"수구를 1쿠션 → 2쿠션 → 3쿠션 순서로 보내서 3쿠션에서 <b>몇 포인트 지점</b>에 도착시키고 싶다"를 고르면, 1쿠션의 어느 포인트를 겨냥해야 하는지 계산합니다. 추천과 달리 적구는 보지 않고 <b>수구 경로만</b> 계산합니다.</p>
+          <ul>
+            <li><b>기하 계산</b>: 회전·마찰 없이 거울 반사로 계산한 겨냥 지점. 파이브앤하프 숫자로도 보여줍니다.</li>
+            <li><b>물리 보정</b>: 지금 설정한 힘·당점으로 실제로 그 도착점에 가도록 각도를 다시 맞춥니다.</li>
+          </ul>
+          <p class="note">예) 1쿠션 상단 → 2쿠션 우측 → 3쿠션 하단, 도착점 4 = 아래 장쿠션 가운데로 보내는 돌리기 겨냥점 찾기</p>
+        </div>
         <div class="row"><span class="lbl">1쿠션</span><select id="c1"></select></div>
         <div class="row"><span class="lbl">2쿠션</span><select id="c2"></select></div>
         <div class="row"><span class="lbl">3쿠션</span><select id="c3"></select></div>

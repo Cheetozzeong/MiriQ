@@ -33,6 +33,7 @@ export interface Shot {
   speed: number; // 큐볼 초속 m/s
   tipX: number; // 좌우 당점 (R 단위, 오른쪽 +)
   tipY: number; // 상하 당점 (R 단위, 위 +)
+  firstBall?: BallId; // 1적구 지정 (예: 초구는 빨간공). 없으면 어느 공이든 먼저 맞혀도 됨
 }
 
 interface Ball { id: BallId; x: number; y: number; vx: number; vy: number; wx: number; wy: number; wz: number; on: boolean }
@@ -313,6 +314,7 @@ export function simulate(layout: Layout, shot: Shot, opt: SimOptions = {}): SimR
     if (!moving) break;
     if (opt.stopWhenDecided) {
       if (secondHit || !isMoving(cue)) break;
+      if (shot.firstBall && firstHit && firstHit !== shot.firstBall) break; // 지정한 1적구가 아닌 공을 먼저 맞힘 → 실패 확정
       // 가지치기: 남은 운동 에너지로 갈 수 있는 최대 거리 < 아직 맞혀야 할 (정지한) 공까지 직선거리 → 실패 확정
       if (opt.prune && (t * 1000) % 20 < dt * 1000) {
         const targets = balls.filter((o) => o !== cue && (firstHit ? o.id !== firstHit : true));
@@ -327,9 +329,11 @@ export function simulate(layout: Layout, shot: Shot, opt: SimOptions = {}): SimR
   }
   if (record) { balls.forEach(pushPath); pushFrame(t); }
 
-  const scored = !!secondHit && cushionsBeforeSecond >= 3;
+  const wrongFirst = !!shot.firstBall && !!firstHit && firstHit !== shot.firstBall;
+  const scored = !!secondHit && cushionsBeforeSecond >= 3 && !wrongFirst;
   let reason: string;
   if (!firstHit) reason = '수구가 적구를 하나도 맞히지 못했습니다';
+  else if (wrongFirst) reason = `1적구는 ${KO[shot.firstBall!]}이어야 하는데 ${KO[firstHit]}을(를) 먼저 맞혔습니다`;
   else if (!secondHit) reason = `1적구(${KO[firstHit]})만 맞고 2적구를 맞히지 못했습니다 (쿠션 ${cushionCount}회)`;
   else if (!scored) reason = `2적구 전에 쿠션 ${cushionsBeforeSecond}회 — 3쿠션 미달`;
   else reason = `1적구 ${KO[firstHit]} → 쿠션 ${cushionsBeforeSecond}회 → 2적구 ${KO[secondHit]} 득점`;

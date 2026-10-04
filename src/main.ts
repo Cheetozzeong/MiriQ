@@ -21,7 +21,7 @@ const PRESETS: { name: string; layout: Layout }[] = [
   { name: '예시 C — 중앙 배치', layout: { white: { x: 1.2, y: 0.9 }, yellow: { x: 1.65, y: 0.65 }, red: { x: 0.3, y: 0.25 } } },
 ];
 let layout: Layout = clone(PRESETS[0].layout);
-let shot: Shot = { cue: 'white', angleDeg: 6, speed: 3.2, tipX: 0.3, tipY: 0.2 };
+let shot: Shot = { cue: 'white', angleDeg: 6, speed: 3.2, tipX: 0.3, tipY: 0.2, firstBall: 'red' }; // 기본 배치 = 초구
 let result: SimResult;
 let prob: number | null = null;
 let sysRes: SystemResult | null = null;
@@ -136,11 +136,18 @@ function resize() {
     S = Math.max(30, vertical ? sV : sH);
     w = (vertical ? fullW : fullL) * S; h = (vertical ? fullL : fullW) * S;
     stage.style.width = `${w}px`;
+  } else if (!mobileMq.matches) {
+    // 데스크톱: 페이지가 스크롤되지 않는 고정 화면 — 테이블 영역(stage)을 꽉 채움
+    stage.style.width = ''; stage.style.height = '';
+    const boxW = stage.clientWidth, boxH = Math.max(160, stage.clientHeight);
+    vertical = false;
+    S = Math.min(boxW / fullL, boxH / fullW);
+    w = fullL * S; h = fullW * S;
   } else {
-    // 세로 모바일: 화면 높이의 56%까지 / 데스크톱: 72%까지. 더 크게 나오는 방향으로 테이블을 세운다
+    // 그 밖의 작은 화면: 화면 높이의 56%까지, 더 크게 나오는 방향으로 테이블을 세운다
     stage.style.width = '';
     const boxW = stage.clientWidth;
-    const boxH = Math.max(200, innerHeight * (mobileMq.matches ? 0.56 : 0.72));
+    const boxH = Math.max(200, innerHeight * 0.56);
     const sH = Math.min(boxW / fullL, boxH / fullW);
     const sV = Math.min(boxW / fullW, boxH / fullL);
     vertical = sV > sH * 1.1;
@@ -148,7 +155,7 @@ function resize() {
     w = (vertical ? fullW : fullL) * S; h = (vertical ? fullL : fullW) * S;
   }
   const key = `${w}x${h}`;
-  stage.style.height = `${h}px`;
+  if (mobileMq.matches || wide || portrait) stage.style.height = `${h}px`;
   const dpr = devicePixelRatio || 1;
   if (key !== lastBox) {
     lastBox = key;
@@ -526,6 +533,7 @@ const cueSel = $('cueSel');
 cueSel.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
   if (dispute) return;
   shot.cue = b.dataset.v as BallId;
+  if (shot.firstBall === shot.cue) shot.firstBall = undefined;
   recompute();
   layoutChanged();
 }));
@@ -537,6 +545,8 @@ presetSel.addEventListener('change', () => {
   if (presetSel.value === 'rand') {
     for (const id of BALL_IDS) placeBall(id, { x: R + Math.random() * (TABLE.L - 2 * R), y: R + Math.random() * (TABLE.W - 2 * R) });
   } else layout = clone(PRESETS[+presetSel.value].layout);
+  // 초구는 반드시 빨간공을 1적구로
+  shot.firstBall = presetSel.value === '0' ? 'red' : undefined;
   sysRes = null;
   recompute();
   layoutChanged();
@@ -617,7 +627,23 @@ function powerText(v: number) {
   return `${v.toFixed(2)} m/s (${lv})`;
 }
 
+function renderFirstSel() {
+  const other = shot.cue === 'white' ? 'yellow' : 'white';
+  const opts: [string, string][] = [['', '자동'], ['red', '빨간공'], [other, KO[other]]];
+  const cur = shot.firstBall ?? '';
+  $('firstSel').innerHTML = opts.map(([v, t]) => `<button data-v="${v}" class="${v === cur ? 'on' : ''}">${t}</button>`).join('');
+  $('firstNote').textContent = shot.firstBall ? '이 공을 먼저 맞혀야 득점' : '어느 공이든 먼저';
+}
+$('firstSel').addEventListener('click', (ev) => {
+  const b = (ev.target as HTMLElement).closest('button');
+  if (!b || dispute) return;
+  shot.firstBall = (b.dataset.v || undefined) as BallId | undefined;
+  renderFirstSel();
+  recompute();
+  layoutChanged();
+});
 function syncInputs() {
+  renderFirstSel();
   cueSel.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === shot.cue));
   coordBody.querySelectorAll('input').forEach((inp) => {
     if (document.activeElement === inp) return;
@@ -847,7 +873,7 @@ $('recOptBtn').addEventListener('click', () => {
   const open = recOpts.classList.toggle('collapsed') === false;
   $('recOptBtn').setAttribute('aria-expanded', String(open));
 });
-const prefsSummary = () => `${SKILL[prefs.skill as Skill].label} · 테이블 ${TABLE_SPEED[prefs.table as TableSpeed].label}${prefs.easyFirst ? ' · 쉬운 샷 우선' : ''}`;
+const prefsSummary = () => `${shot.firstBall ? `1적구 ${KO[shot.firstBall]} · ` : ''}${SKILL[prefs.skill as Skill].label} · 테이블 ${TABLE_SPEED[prefs.table as TableSpeed].label}${prefs.easyFirst ? ' · 쉬운 샷 우선' : ''}`;
 
 // 설정: 실력 단계 · 테이블 상태 · 쉬운 샷 우선
 function bindSeg(id: string, key: 'skill' | 'table', after: () => void) {
@@ -1003,7 +1029,7 @@ $('dSubmit').addEventListener('click', async () => {
   const pick = (c: Candidate) => ({ angleDeg: c.angleDeg, speed: c.speed, tipX: c.tipX, tipY: c.tipY, prob: c.prob, width: c.width, summary: c.summary });
   const payload = {
     v: 1, kind: 'dispute', clientId: clientId(), appVersion: __APP_VERSION__,
-    layout, cue: shot.cue, recMode,
+    layout, cue: shot.cue, firstBall: shot.firstBall ?? null, recMode,
     recommended: dispute.recs.map(pick), disputedRank: dispute.rank,
     userShot: { angleDeg: shot.angleDeg, speed: shot.speed, tipX: shot.tipX, tipY: shot.tipY },
     userSim: { scored: o.scored, firstHit: o.firstHit ?? null, secondHit: o.secondHit ?? null, cushions: o.cueCushions, kiss: o.kiss, prob },
@@ -1178,7 +1204,7 @@ function snapPos(p: Pos): Pos {
 // 배치 이력 (되돌리기/다시) + 주소에 배치 저장 (공유·새로고침 유지)
 const layoutHist: string[] = [];
 let histIdx = -1;
-const snapshot = () => JSON.stringify({ layout, cue: shot.cue });
+const snapshot = () => JSON.stringify({ layout, cue: shot.cue, firstBall: shot.firstBall ?? null });
 function saveHistory() {
   const snap = snapshot();
   if (layoutHist[histIdx] === snap) return;
@@ -1193,7 +1219,7 @@ function restoreHistory(i: number) {
   if (i < 0 || i >= layoutHist.length) return;
   histIdx = i;
   const v = JSON.parse(layoutHist[i]);
-  layout = v.layout; shot.cue = v.cue;
+  layout = v.layout; shot.cue = v.cue; shot.firstBall = v.firstBall ?? undefined;
   updateHistButtons();
   recompute();
   layoutChanged();
@@ -1207,15 +1233,19 @@ $('redoBtn').addEventListener('click', () => { if (!dispute) restoreHistory(hist
 
 function encodeLayout() {
   const n = BALL_IDS.flatMap((id) => [layout[id].x, layout[id].y]).map((v) => Math.round((v / DIAMOND) * 100));
-  return [...n, shot.cue[0]].join('.');
+  return [...n, shot.cue[0] + (shot.firstBall ? shot.firstBall[0] : '')].join('.');
 }
 function loadFromHash() {
-  const m = location.hash.match(/l=([\d.]+)\.([wy])/);
+  const m = location.hash.match(/l=([\d.]+)\.([wy])([rwy]?)/);
   if (!m) return false;
   const n = m[1].split('.').map(Number);
   if (n.length !== 6 || n.some((v) => !Number.isFinite(v))) return false;
   BALL_IDS.forEach((id, i) => placeBall(id, { x: (n[i * 2] / 100) * DIAMOND, y: (n[i * 2 + 1] / 100) * DIAMOND }));
   shot.cue = m[2] === 'y' ? 'yellow' : 'white';
+  const fb = ({ r: 'red', w: 'white', y: 'yellow' } as Record<string, BallId>)[m[3]];
+  // 예전 링크(1적구 정보 없음)라도 초구 배치면 빨간공
+  const isOpening = BALL_IDS.every((id) => Math.hypot(layout[id].x - PRESETS[0].layout[id].x, layout[id].y - PRESETS[0].layout[id].y) < 0.01);
+  shot.firstBall = fb && fb !== shot.cue ? fb : !m[3] && isOpening ? 'red' : undefined;
   return true;
 }
 $('shareBtn').addEventListener('click', async () => {

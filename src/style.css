@@ -374,3 +374,45 @@ body.portrait .rec-status { margin: 4px 0; font-size: 12px; }
 .ph-head b { display: inline-flex; gap: 6px; align-items: center; }
 .ph-actions button, .ph-actions .file-btn { min-height: 48px; font-size: 15px; }
 #phCornersOk, #phShoot { min-height: 50px; }
+
+/* 1적구 지정 */
+.first-row { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; flex-wrap: wrap; }
+.first-row .lbl { width: auto; }
+.first-row .note { margin: 0; }
+#firstSel button.on[data-v='red'] { background: #b42025; }
+#firstSel button.on[data-v='yellow'] { background: #c9a01e; color: #1b1606; }
+#firstSel button.on[data-v='white'] { background: #e9e6dc; color: #111; }
+
+/* ───────── 데스크톱: 페이지 스크롤 없이 한 화면에 ─────────
+   왼쪽 테이블은 남는 공간을 꽉 채우고, 오른쪽은 탭으로 나눠 한 번에 한 영역만 */
+@media (min-width: 961px) {
+  body { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+  .top { flex: none; padding: 8px 20px; }
+  .layout { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) 390px; grid-template-rows: minmax(0, 1fr); padding: 12px 20px 14px; }
+  .table-wrap { display: flex; flex-direction: column; min-height: 0; }
+  .stage { flex: 1; min-height: 160px; }
+  .sheet { display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+  .tabs { display: flex; flex: none; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 3px; gap: 3px; }
+  .tabs button { flex: 1; border: 0; background: transparent; color: var(--muted); height: 36px; font-weight: 600; }
+  .tabs button.on { background: var(--accent); color: #fff; }
+  .panel { flex: 1; min-height: 0; overflow-y: auto; display: block; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
+  .panel details { display: none; border: 0; padding: 0; background: transparent; }
+  .panel details.active { display: block; }
+  .panel summary { display: none; }
+  .cards { gap: 6px; }
+  .card { padding: 8px 10px; }
+  .how { margin-top: 4px; font-size: 13px; }
+  .route { margin-top: 3px; font-size: 12.5px; }
+  .card .note { font-size: 11.5px; margin: 2px 0 0; }
+  .events { max-height: 130px; }
+  .rec-head .big { height: 40px; }
+  .verdict { padding: 8px 14px; font-size: 14px; }
+  .verdict b { font-size: 15px; }
+}
+
+.sys-help { background: var(--panel-2); border-radius: 10px; padding: 10px 12px; margin: 4px 0 10px; font-size: 13px; }
+.sys-help p { margin: 6px 0; }
+.sys-help ul { margin: 4px 0; padding-left: 18px; }
+.sys-help li { margin: 2px 0; }
+body.portrait .first-row .note, body.wide .first-row .note { display: none; }
+body.portrait .first-row { margin: 0 0 4px; }
