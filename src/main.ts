@@ -607,14 +607,16 @@ cueSel.querySelectorAll('button').forEach((b) => b.addEventListener('click', () 
   layoutChanged();
 }));
 const presetSel = $<HTMLSelectElement>('preset');
+presetSel.add(new Option('배치 선택…', ''));
 PRESETS.forEach((p, i) => presetSel.add(new Option(p.name, String(i))));
 presetSel.add(new Option('랜덤 배치', 'rand'));
 presetSel.addEventListener('change', () => {
-  if (dispute) return;
+  if (dispute || presetSel.value === '') return;
   if (presetSel.value === 'rand') {
     for (const id of BALL_IDS) placeBall(id, { x: R + Math.random() * (TABLE.L - 2 * R), y: R + Math.random() * (TABLE.W - 2 * R) });
   } else layout = clone(PRESETS[+presetSel.value].layout);
   if (presetSel.value !== '0' && !openingForcedFirst) shot.firstBall = undefined;
+  presetSel.value = ''; // 같은 배치를 다시 골라도 동작하도록
   sysRes = null;
   recompute();
   layoutChanged();
@@ -912,6 +914,7 @@ async function recommend() {
 
 let recTimer = 0;
 function layoutChanged() {
+  updateOpening(); // 초구 여부(→ 1적구 자동 지정/해제)를 배치 기준으로 바로 반영
   hideAfterShot();
   hideGuide();
   activeSearch?.cancel(); searchGen++;
@@ -1369,7 +1372,7 @@ function snapPos(p: Pos): Pos {
 // 배치 이력 (되돌리기/다시) + 주소에 배치 저장 (공유·새로고침 유지)
 const layoutHist: string[] = [];
 let histIdx = -1;
-const snapshot = () => JSON.stringify({ layout, cue: shot.cue, firstBall: shot.firstBall ?? null });
+const snapshot = () => JSON.stringify({ layout, cue: shot.cue, firstBall: shot.opening ? null : shot.firstBall ?? null });
 function saveHistory() {
   const snap = snapshot();
   if (layoutHist[histIdx] === snap) return;
@@ -1398,7 +1401,7 @@ $('redoBtn').addEventListener('click', () => { if (!dispute) restoreHistory(hist
 
 function encodeLayout() {
   const n = BALL_IDS.flatMap((id) => [layout[id].x, layout[id].y]).map((v) => Math.round((v / DIAMOND) * 100));
-  return [...n, shot.cue[0] + (shot.firstBall ? shot.firstBall[0] : '')].join('.');
+  return [...n, shot.cue[0] + (shot.firstBall && !shot.opening ? shot.firstBall[0] : '')].join('.');
 }
 function loadFromHash() {
   const m = location.hash.match(/l=([\d.]+)\.([wy])([rwy]?)/);
@@ -1410,9 +1413,21 @@ function loadFromHash() {
   const fb = ({ r: 'red', w: 'white', y: 'yellow' } as Record<string, BallId>)[m[3]];
   // 예전 링크(1적구 정보 없음)라도 초구 배치면 빨간공
   const isOpening = BALL_IDS.every((id) => Math.hypot(layout[id].x - PRESETS[0].layout[id].x, layout[id].y - PRESETS[0].layout[id].y) < 0.01);
-  shot.firstBall = fb && fb !== shot.cue ? fb : !m[3] && isOpening ? 'red' : undefined;
+  // 초구 배치의 빨간공은 규칙으로 정해지는 값 → 여기서는 지정하지 않고 updateOpening 이 처리 (초구 후 자동 해제)
+  shot.firstBall = !isOpening && fb && fb !== shot.cue ? fb : undefined;
   return true;
 }
+// 초구 배치로 돌아가기 (공 위치 + 흰공 수구 → 초구 규칙 자동 적용)
+$('openingBtn').addEventListener('click', () => {
+  if (dispute) return;
+  layout = clone(PRESETS[0].layout);
+  shot.cue = 'white';
+  runCount = 0;
+  sysRes = null;
+  recompute();
+  layoutChanged();
+  selectTab(0);
+});
 $('shareBtn').addEventListener('click', async () => {
   const url = `${location.origin}${location.pathname}#l=${encodeLayout()}`;
   try {
