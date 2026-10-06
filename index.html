@@ -157,6 +157,7 @@
           <label class="chk"><input type="checkbox" id="easyFirst" checked /> 쉬운 샷 우선</label>
           <label class="chk"><input type="checkbox" id="autoRec" checked /> 배치 바뀌면 자동 추천</label>
         </div>
+        <button id="disputeBtn" class="dispute-entry dispute-top hidden">👎 추천이 마음에 안 들어요 — <b>내 샷 제안하기</b></button>
         <div id="recStatus" class="rec-status"></div>
         <div id="progress" class="progress hidden"><div></div></div>
         <ol id="cands" class="cards"></ol>
@@ -166,7 +167,6 @@
           <span id="logMsg" class="note"></span>
         </div>
         <p id="statsNote" class="note"></p>
-        <button id="disputeBtn" class="dispute-entry hidden">추천이 아쉬울 때 — <b>내 샷 제안하기</b></button>
         <p id="queueNote" class="note hidden"></p>
       </details>
 
@@ -204,7 +204,7 @@
       <details open>
         <summary>② 샷 직접 조정</summary>
         <div id="disputeBox" class="dispute hidden">
-          <div class="dispute-head"><b>이의제기 중</b><span class="note">배치는 고정 · 테이블 겨냥/미세 조정, 힘, 당점만 바꿔 내 샷을 만드세요</span></div>
+          <div class="dispute-head"><b id="dTitle">내 샷 제안하기</b><span class="note" id="dHint">배치는 고정 · 테이블 겨냥/미세 조정, 힘, 당점만 바꿔 내 샷을 만드세요</span></div>
           <div id="dCompare" class="d-compare"></div>
           <div class="row d-row"><span class="lbl">사유</span>
             <div class="chips" id="dReason">

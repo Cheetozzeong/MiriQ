@@ -535,3 +535,20 @@ body.shooting .hud-go { display: none; }
 .dislike:hover, .dislike.on { opacity: 1; border-color: var(--line); }
 .dl-row { margin-top: 6px; padding: 6px 8px; background: rgba(0,0,0,.25); border-radius: 8px; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
 .dl-done { margin-top: 4px; font-size: 12px; color: var(--muted); }
+
+/* 내 샷 제안하기: 추천 목록 맨 위 */
+.dispute-entry.dispute-top { margin: 4px 0 6px; padding: 8px 10px; font-size: 13px; border-style: solid; border-color: rgba(245,185,66,.45); color: var(--text); }
+
+/* 모바일 추천 카드: 순위·난이도·득점·후구·수비·👎만 (경로·겨냥 설명은 카드를 눌러 테이블/안내 카드에서) */
+body.portrait .card, body.wide .card { padding: 7px 10px; }
+body.portrait .card .how, body.wide .card .how,
+body.portrait .card .route, body.wide .card .route,
+body.portrait .card > .note, body.wide .card > .note,
+body.portrait .card .tag, body.wide .card .tag,
+body.portrait .card .pat, body.wide .card .pat,
+body.portrait .card .metric:first-child, body.wide .card .metric:first-child { display: none; }
+body.portrait .card-top, body.wide .card-top { gap: 6px; }
+body.portrait .card .pct, body.wide .card .pct { margin-left: auto; }
+body.portrait .card .metrics, body.wide .card .metrics { margin-top: 3px; gap: 12px; }
+body.portrait .card .card-go, body.wide .card .card-go { min-height: 32px; margin-top: 5px; font-size: 13px; }
+body.portrait .cards, body.wide .cards { gap: 5px; }

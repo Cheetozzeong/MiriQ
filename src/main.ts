@@ -886,7 +886,7 @@ async function recommend() {
   }
   // 득점 우선이면 바로 1순위를 보여주고, 후구·수비는 뒤에서 계산해 카드에 채움
   const waitPos = prefs.priority !== 'score';
-  if (!waitPos) { setProgress(null, doneText()); applyCandidate(0); }
+  if (!waitPos) { setProgress(null, doneText()); if (!dispute) applyCandidate(0); }
   // 3단계: 상위 후보(득점 기준 4개)의 후구 배치·수비 평가 — 후구는 다음 배치에 추천 엔진을 다시 돌려 계산
   // (대기 시간을 줄이려고 4개만; 나머지 카드는 후구·수비 "—")
   const targets = rankCandidates(pool, 'score', 4);
@@ -909,11 +909,11 @@ async function recommend() {
   if (gen !== searchGen) return;
   activeSearch = null;
   posDone = true;
-  const cur = currentCand() >= 0 ? candidates[currentCand()] : null;
   candidates = rankCandidates(pool);
   setProgress(null, doneText());
-  if (waitPos || !cur) applyCandidate(0);
-  else renderCands(); // 득점 우선: 보고 있던 샷은 그대로 두고 지표만 갱신
+  // 후구·수비 기준이면 새 1순위를 적용. 단 이의제기 중이거나 이미 보고/고치던 샷이 있으면 덮어쓰지 않음
+  if (waitPos && !dispute) applyCandidate(0);
+  else renderCands();
 }
 
 let recTimer = 0;
@@ -1018,14 +1018,16 @@ function renderCands() {
     if (t.closest('[data-dislike]')) { dislikeOpen = dislikeOpen === i ? -1 : i; renderCands(); return; }
     const dl = t.closest<HTMLElement>('[data-dl]');
     if (dl) {
+      // 👎 이유는 바로 저장하고, 이어서 "어떻게 치고 싶은지"(내 샷 제안)로 연결 — 두 기록은 서로 연결해 저장
       const c = candidates[i];
       disliked.set(candKey(c), dl.dataset.dl!);
       dislikeOpen = -1;
-      sendFeedback('card_dislike', { rank: i, reason: dl.dataset.dl, shot: shotOf({ ...shot, ...c }), data: { candidate: candInfo(c) } });
-      renderCands();
+      const linked = sendFeedback('card_dislike', { rank: i, reason: dl.dataset.dl, shot: shotOf({ ...shot, ...c }), data: { candidate: candInfo(c) } });
+      applyCandidate(i);
+      startDispute({ source: 'dislike', reason: dl.dataset.dl, linked });
       return;
     }
-    if (t.closest('[data-propose]')) { dislikeOpen = -1; applyCandidate(i); startDispute(); return; }
+    if (t.closest('[data-propose]')) { dislikeOpen = -1; applyCandidate(i); startDispute({ source: 'card' }); return; }
     if (candidates[i]?.pending) return;
     if (i === currentCand()) { closeDrawer(); startAnim(); return; } // 이미 적용된 카드를 다시 탭하면 재생
     applyCandidate(i);
@@ -1142,7 +1144,12 @@ $('sysCal').addEventListener('click', () => {
 // ───────── 이의제기 (데이터 수집) ─────────
 // 추천이 아쉬울 때: 배치는 고정한 채 방향·힘·당점만 바꿔 "내 샷"을 제안 → /api/feedback 으로 전송
 // 서버 저장소가 아직 없거나 오프라인이면 이 기기(localStorage)에 보관했다가 다음에 자동 재전송
-interface Dispute { rank: number; recs: Candidate[]; reason: string | null; actual: string }
+interface Dispute {
+  rank: number; recs: Candidate[]; reason: string | null; actual: string;
+  source: string; // 어디서 시작했는지: button | nudge | dislike | miss
+  linked?: Promise<SendResult>; // 먼저 저장한 👎/실패 이유 기록과 연결
+  linkedReason?: string; // 👎 이유 원문 (wrong_path 등)
+}
 let dispute: Dispute | null = null;
 const QUEUE_KEY = 'miriq.feedbackQueue';
 const store = {
@@ -1159,13 +1166,22 @@ function setDisputeLocks(on: boolean) {
   document.body.classList.toggle('disputing', on);
   [sections[1], document.querySelector<HTMLElement>('#tabs [data-tab="1"]')!, $('recBtn'), $('recMode'), $('lock'), $('disputeBtn')].forEach((el) => el.classList.toggle('lock-hide', on));
 }
-function startDispute() {
+// 👎·실패 이유 → 내 샷 제안의 사유 칩 매핑 ("이 길 아님" = 더 좋은 길이 있음)
+const DISPUTE_REASON: Record<string, string> = { hard: 'hard', wrong_path: 'better', better: 'better', physics: 'physics' };
+function startDispute(opts: { source?: string; reason?: string; linked?: Dispute['linked'] } = {}) {
   const cur = currentCand();
   const rank = cur >= 0 ? cur : lastApplied < candidates.length ? lastApplied : -1;
-  dispute = { rank, recs: clone(candidates), reason: null, actual: 'untested' };
+  const preset = opts.reason ? DISPUTE_REASON[opts.reason] ?? 'other' : null;
+  dispute = { rank, recs: clone(candidates), reason: preset, actual: 'untested', source: opts.source ?? 'button', linked: opts.linked, linkedReason: opts.reason };
   ($('dComment') as HTMLTextAreaElement).value = '';
   $('dMsg').textContent = '';
-  $('dReason').querySelectorAll('button').forEach((b) => b.classList.remove('on'));
+  $('dReason').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === preset));
+  // 👎에서 넘어왔으면: "그럼 어떻게 치고 싶으세요?" — 이 카드의 샷에서 출발해 바꾸기만 하면 됨
+  const fromDislike = opts.source === 'dislike';
+  $('dTitle').textContent = fromDislike ? `👎 ${DL_KO[opts.reason!] ?? ''} — 그럼 어떻게 치고 싶으세요?` : '내 샷 제안하기';
+  $('dHint').textContent = fromDislike
+    ? '이 추천에서 출발해요. 테이블에서 겨냥하거나 방향·힘·당점을 바꿔 치고 싶은 샷을 만든 뒤 제출해 주세요'
+    : '배치는 고정 · 테이블 겨냥/미세 조정, 힘, 당점만 바꿔 내 샷을 만드세요';
   $('dActual').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'untested'));
   $('disputeBox').classList.remove('hidden');
   setDisputeLocks(true);
@@ -1198,7 +1214,7 @@ function renderDispute() {
       <div>${routeOf(o.firstHit, o.cueCushions, o.secondHit)}</div>
       <div class="note">${tipLabel(shot.tipX, shot.tipY)} · 힘 ${shot.speed.toFixed(1)} · ${shot.angleDeg.toFixed(1)}°</div></div>`;
 }
-$('disputeBtn').addEventListener('click', startDispute);
+$('disputeBtn').addEventListener('click', () => startDispute({ source: 'button' }));
 $('dCancel').addEventListener('click', () => endDispute(true));
 $('dReason').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
   if (!dispute) return;
@@ -1235,11 +1251,19 @@ $('dSubmit').addEventListener('click', async () => {
   };
   $('dMsg').textContent = '전송 중…';
   void payload;
+  const link = dispute.linked ? await dispute.linked : null;
   const r = await sendFeedback('dispute', {
     shot: shotOf(shot), rank: dispute.rank, reason: dispute.reason, result: dispute.actual,
     comment: ($('dComment') as HTMLTextAreaElement).value.trim().slice(0, 500),
     recommended: dispute.recs.map(candInfo),
-    data: { userSim: { scored: o.scored, firstHit: o.firstHit ?? null, secondHit: o.secondHit ?? null, cushions: o.cueCushions, kiss: o.kiss, prob } },
+    data: {
+      userSim: { scored: o.scored, firstHit: o.firstHit ?? null, secondHit: o.secondHit ?? null, cushions: o.cueCushions, kiss: o.kiss, prob },
+      source: dispute.source, // button | nudge | dislike | miss
+      linkedId: link && link.ok ? link.id : null, // 먼저 저장한 👎 / 실패 이유 기록 id (서버 저장 성공 시)
+      linkedFid: link?.fid ?? null, // 같은 기록의 기기 생성 ID (항상 있음 — 오프라인 보관 후 전송돼도 연결 가능)
+      linkedReason: dispute.linkedReason ?? null,
+      recShot: dispute.rank >= 0 && dispute.recs[dispute.rank] ? shotOf(dispute.recs[dispute.rank]) : null,
+    },
   });
   if (r.ok) $('dMsg').innerHTML = `<span style="color:var(--ok)">제출 완료 (#${r.id}) — 고맙습니다!</span>`;
   else if (r.queued) $('dMsg').innerHTML = '<span style="color:var(--warn)">서버에 연결되지 않아 이 기기에 보관했습니다 — 연결되면 자동 전송</span>';
@@ -1597,20 +1621,25 @@ function resetFeedbackState() {
   $('nudge').classList.add('hidden');
   if (pendingRest) { clearTimeout(restTimer); restTimer = window.setTimeout(sendRest, 4000); }
 }
-async function sendFeedback(kind: string, extra: Record<string, unknown>): Promise<{ ok: true; id: number } | { ok: false; queued: boolean }> {
+type SendResult = { ok: true; id: number; fid: string } | { ok: false; queued: boolean; fid: string };
+async function sendFeedback(kind: string, extra: Record<string, unknown>): Promise<SendResult> {
+  const fid = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const payload = {
-    v: 2, kind, clientId: clientId(), appVersion: __APP_VERSION__, layout: clone(layout), cue: shot.cue,
+    v: 2, kind, fid, clientId: clientId(), appVersion: __APP_VERSION__, layout: clone(layout), cue: shot.cue,
     recommended: candidates.filter((c) => !c.pending).map(candInfo),
     settings: { skill: prefs.skill, table: prefs.table, priority: prefs.priority, easyFirst: prefs.easyFirst, recMode, firstBall: shot.firstBall ?? null, opening: !!shot.opening },
     physics: PHYS, createdAt: new Date().toISOString(), ...extra,
   };
+  // 기록 고유 ID(fid)는 data 안에도 넣어 서버에 함께 저장 → 기기에 보관됐다 나중에 보내져도 서로 연결 가능
+  (payload as { data?: Record<string, unknown> }).data = { ...((extra.data as Record<string, unknown>) ?? {}), fid };
   const r = await postFeedback(payload);
-  if (r.ok) return r;
+  if (r.ok) return { ...r, fid };
   if (r.retry) { const q = store.get<unknown[]>(QUEUE_KEY, []); q.push(payload); store.set(QUEUE_KEY, q.slice(-300)); renderQueueNote(); }
-  return { ok: false, queued: r.retry };
+  return { ok: false, queued: r.retry, fid };
 }
 
 // ① 실패 이유
+let lastMissLink: Dispute['linked'] | null = null;
 function renderWhy() {
   $('asWhy').innerHTML = `<span class="as-why-q">왜 빗나갔을까요?</span><div class="chips sm">
     <button data-why="physics">예측과 다르게 갔어요</button><button data-why="hard">너무 어려웠어요</button>
@@ -1618,12 +1647,12 @@ function renderWhy() {
 }
 $('asWhy').addEventListener('click', (ev) => {
   const t = ev.target as HTMLElement;
-  if (t.closest('[data-propose]')) { hideAfterShot(); startDispute(); return; }
+  if (t.closest('[data-propose]')) { hideAfterShot(); startDispute({ source: 'miss', reason: 'better', linked: lastMissLink ?? undefined }); return; }
   const b = t.closest<HTMLElement>('[data-why]');
   if (!b) return;
   asked.add('miss');
   if (b.dataset.why === 'skip') { $('asWhy').classList.add('hidden'); return; }
-  sendFeedback('miss_reason', { shot: shotOf(shot), rank: currentCand(), reason: b.dataset.why });
+  lastMissLink = sendFeedback('miss_reason', { shot: shotOf(shot), rank: currentCand(), reason: b.dataset.why });
   $('asWhy').innerHTML = `<span class="done">고마워요 🙏 예측을 고치는 데 쓸게요</span>${b.dataset.why === 'better' ? '<button class="link" data-propose="1">어떤 길이 나았는지 내 샷 제안하기 →</button>' : ''}`;
 });
 
@@ -1646,7 +1675,7 @@ function maybeNudge() {
   asked.add('nudge');
   $('nudge').classList.remove('hidden');
 }
-$('nudgeGo').addEventListener('click', () => { $('nudge').classList.add('hidden'); startDispute(); });
+$('nudgeGo').addEventListener('click', () => { $('nudge').classList.add('hidden'); startDispute({ source: 'nudge' }); });
 $('nudgeClose').addEventListener('click', () => $('nudge').classList.add('hidden'));
 $('pendingRec').addEventListener('click', () => { setShooting(false); showAfterShot(); });
 
