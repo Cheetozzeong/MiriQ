@@ -235,7 +235,6 @@
           <button class="mini" data-da="0.1">+.1</button>
           <button class="mini" data-da="1">+1°</button>
         </div>
-        <div class="row thick-row"><span class="lbl">두께</span><div id="thickView" class="thick"></div></div>
         <div class="row">
           <span class="lbl">힘</span>
           <input type="range" id="speed" min="0.5" max="6" step="0.05" />
@@ -245,6 +244,7 @@
           <span class="lbl">당점</span>
           <canvas id="tip" width="264" height="264"></canvas>
           <div class="tip-info">
+            <div id="thickView" class="thick tip-thick" title="두께: 1적구 위에 수구를 겹쳐 본 모습"></div>
             <div id="tipTxt" class="val"></div>
             <button class="mini" id="tipReset">중앙</button>
             <p class="note">공 그림을 터치/드래그.<br />1팁 = 공 반지름의 20%</p>
