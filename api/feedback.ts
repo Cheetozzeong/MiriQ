@@ -1,7 +1,7 @@
 // 피드백 수집 API — Vercel 서버리스 함수 (저장소: Neon Postgres, DATABASE_URL 자동 주입)
 //  POST /api/feedback : 피드백 1건 저장
 //  GET  /api/feedback : (관리자) 목록 ?kind=&status=&limit=&offset= · 상세 ?id= · 내보내기 ?export=approved
-//  PATCH /api/feedback : (관리자) 검토 상태 저장 { id, status: pending|approved|rejected|hold, note }
+//  PATCH /api/feedback : (관리자) 검토 상태 저장 { id | ids[], status: pending|approved|rejected|hold, note }
 //  관리자 인증: Authorization: Bearer $FEEDBACK_ADMIN_TOKEN (Vercel 환경 변수)
 //
 // kind (피드백 종류)
@@ -163,10 +163,17 @@ export async function PATCH(req: Request) {
   if (!sql) return json({ ok: false, error: 'storage_not_configured' }, 503);
   let b: any;
   try { b = JSON.parse(await req.text()); } catch { return json({ ok: false, error: 'invalid_json' }, 400); }
-  if (!num(b?.id, 1, 1e12) || !STATUSES.includes(b.status) || !str(b.note, 1000)) return json({ ok: false, error: 'invalid' }, 400);
+  // 한 건 { id } 또는 여러 건 { ids: [...] } (최대 200건). 여러 건일 때 메모를 비우면 기존 메모 유지
+  const ids: number[] = Array.isArray(b?.ids) ? b.ids : [b?.id];
+  if (!ids.length || ids.length > 200 || !ids.every((v) => num(v, 1, 1e12)) || !STATUSES.includes(b.status) || !str(b.note, 1000)) {
+    return json({ ok: false, error: 'invalid' }, 400);
+  }
   await ensureTable(sql);
-  const rows = await sql`update feedback set review_status = ${b.status}, review_note = ${b.note || null}, reviewed_at = now()
-    where id = ${b.id} returning id, review_status, review_note, reviewed_at`;
+  const rows = Array.isArray(b.ids)
+    ? await sql`update feedback set review_status = ${b.status}, review_note = coalesce(${b.note || null}, review_note), reviewed_at = now()
+        where id = any(${ids}::bigint[]) returning id, review_status`
+    : await sql`update feedback set review_status = ${b.status}, review_note = ${b.note || null}, reviewed_at = now()
+        where id = ${ids[0]} returning id, review_status, review_note, reviewed_at`;
   if (!rows.length) return json({ ok: false, error: 'not_found' }, 404);
-  return json({ ok: true, row: rows[0] });
+  return json({ ok: true, updated: rows.length, row: rows[0] });
 }

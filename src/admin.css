@@ -83,3 +83,27 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
   .a-list { max-height: 50vh; }
   .d-kv { grid-template-columns: 80px 1fr; }
 }
+
+/* 여러 개 선택 */
+.bulk { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding: 6px 8px; background: var(--panel-2); border-radius: 8px; }
+.bulk .chk { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; }
+.bulk-btns { display: flex; gap: 5px; margin-left: auto; }
+.bulk-btns button { padding: 3px 9px; font-size: 12.5px; }
+.bulk-btns .ok { border-color: var(--ok); color: var(--ok); }
+.bulk-btns .bad { border-color: var(--fail); color: var(--fail); }
+.a-rows li { display: grid; grid-template-columns: 22px 1fr; column-gap: 6px; }
+.a-rows li .ck { grid-row: 1 / 4; align-self: start; margin-top: 3px; width: 16px; height: 16px; }
+.a-rows li.sel { background: #22303f; }
+
+/* 경로 보기 전환 */
+.d-view { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.d-view .seg { flex: none; }
+.d-view .seg button { padding: 5px 10px; }
+.d-view .seg button::after { content: none; }
+.d-tables { display: grid; gap: 10px; margin: 8px 0 6px; }
+.d-tables.split { grid-template-columns: 1fr 1fr; }
+.d-tables figure { margin: 0; }
+.d-tables figcaption { font-size: 12.5px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+.d-tables figcaption b { font-weight: 700; }
+@media (max-width: 1100px) { .d-tables.split { grid-template-columns: 1fr; } }
+.a-toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #0f141a; border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: 13px; z-index: 50; box-shadow: 0 6px 20px rgba(0,0,0,.45); }

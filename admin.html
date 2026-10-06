@@ -43,6 +43,15 @@
           <option value="record">결과 기록</option>
         </select>
       </div>
+      <div class="bulk" id="bulkBar">
+        <label class="chk"><input type="checkbox" id="checkAll" /> 이 페이지 전체</label>
+        <span id="bulkN" class="note">선택 0개</span>
+        <div class="bulk-btns">
+          <button data-bulk="approved" class="ok" disabled>✓ 반영</button>
+          <button data-bulk="hold" disabled>보류</button>
+          <button data-bulk="rejected" class="bad" disabled>✗ 제외</button>
+        </div>
+      </div>
       <p id="listInfo" class="note"></p>
       <ol id="rows" class="a-rows"></ol>
       <div class="a-pager"><button id="prevPage">◀ 이전</button><span id="pageInfo"></span><button id="nextPage">다음 ▶</button></div>

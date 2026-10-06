@@ -73,9 +73,11 @@ async function loadList() {
   $('pageInfo').textContent = `${Math.floor(state.offset / state.limit) + 1} / ${Math.max(1, Math.ceil(state.total / state.limit))}`;
   ($('prevPage') as HTMLButtonElement).disabled = state.offset === 0;
   ($('nextPage') as HTMLButtonElement).disabled = state.offset + state.limit >= state.total;
+  setTimeout(syncBulk, 0);
   $('rows').innerHTML = state.rows.map((r) => {
     const d = device(r.user_agent);
-    return `<li data-id="${r.id}" class="${r.id === state.current ? 'on' : ''}">
+    return `<li data-id="${r.id}" class="${r.id === state.current ? 'on' : ''}${selected.has(r.id) ? ' sel' : ''}">
+      <input type="checkbox" class="ck" data-check="${r.id}"${selected.has(r.id) ? ' checked' : ''} aria-label="#${r.id} 선택" />
       <div class="r1"><b>#${r.id}</b><span class="kind k-${r.kind}">${KIND_KO[r.kind] ?? r.kind}</span><span class="st st-${r.review_status}">${STATUS_KO[r.review_status]}</span><span class="t">${ago(r.created_at)}</span></div>
       <div class="r2">${r.reason ? esc(REASON_KO[r.reason] ?? r.reason) : r.result ? esc(RESULT_KO[r.result] ?? r.result) : '—'}${r.comment ? ` · “${esc(r.comment).slice(0, 40)}”` : ''}</div>
       <div class="r3">${esc(d.short)}${r.source ? ` · ${esc(SOURCE_KO[r.source] ?? r.source)}` : ''}</div>
@@ -83,9 +85,64 @@ async function loadList() {
   }).join('');
 }
 $('rows').addEventListener('click', (ev) => {
-  const li = (ev.target as HTMLElement).closest<HTMLElement>('li[data-id]');
+  const t = ev.target as HTMLElement;
+  const ck = t.closest<HTMLInputElement>('[data-check]');
+  if (ck) { // 체크박스: 선택만 (상세는 열지 않음)
+    const id = Number(ck.dataset.check);
+    if (ck.checked) selected.add(id); else selected.delete(id);
+    ck.closest('li')!.classList.toggle('sel', ck.checked);
+    syncBulk();
+    return;
+  }
+  const li = t.closest<HTMLElement>('li[data-id]');
   if (li) loadDetail(Number(li.dataset.id));
 });
+
+// ───────── 여러 개 한 번에 상태 지정 ─────────
+const selected = new Set<number>();
+function syncBulk() {
+  const n = selected.size;
+  $('bulkN').textContent = `선택 ${n}개`;
+  $('bulkBar').querySelectorAll<HTMLButtonElement>('[data-bulk]').forEach((b) => { b.disabled = n === 0; });
+  const all = state.rows.length > 0 && state.rows.every((r) => selected.has(r.id));
+  ($('checkAll') as HTMLInputElement).checked = all;
+}
+$('checkAll').addEventListener('change', () => {
+  const on = ($('checkAll') as HTMLInputElement).checked;
+  for (const r of state.rows) { if (on) selected.add(r.id); else selected.delete(r.id); }
+  $('rows').querySelectorAll<HTMLInputElement>('[data-check]').forEach((c) => { c.checked = on; c.closest('li')!.classList.toggle('sel', on); });
+  syncBulk();
+});
+$('bulkBar').querySelectorAll<HTMLButtonElement>('[data-bulk]').forEach((b) => b.addEventListener('click', async () => {
+  if (!selected.size) return;
+  const st = b.dataset.bulk!;
+  if (!confirmBulk(st)) return;
+  b.disabled = true;
+  const body = await api('', { method: 'PATCH', body: JSON.stringify({ ids: [...selected], status: st }) });
+  selected.clear();
+  await loadList();
+  syncBulk();
+  toastAdmin(`${body.updated}개를 '${STATUS_KO[st]}'(으)로 바꿨어요`);
+  if (state.current && !state.rows.some((r) => r.id === state.current)) {
+    if (state.rows.length) loadDetail(state.rows[0].id);
+    else $('detail').innerHTML = '<p class="note a-empty">이 목록의 기록을 모두 처리했어요 👍</p>';
+  }
+}));
+// 브라우저 기본 확인창 대신 같은 버튼을 한 번 더 누르면 실행 (실수 방지)
+let armed: string | null = null, armTimer = 0;
+function confirmBulk(st: string) {
+  if (armed === st) { armed = null; clearTimeout(armTimer); return true; }
+  armed = st;
+  toastAdmin(`선택한 ${selected.size}개를 '${STATUS_KO[st]}'(으)로 바꾸려면 한 번 더 누르세요`);
+  clearTimeout(armTimer); armTimer = window.setTimeout(() => { armed = null; }, 3000);
+  return false;
+}
+function toastAdmin(msg: string) {
+  const t = document.createElement('div');
+  t.className = 'a-toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
 $('statusSel').addEventListener('click', (ev) => {
   const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('button');
   if (!b) return;
@@ -141,6 +198,12 @@ async function loadDetail(id: number) {
   const lines: string[] = [];
   let ghosts: Parameters<typeof drawTable>[3] = [];
   let drawLayout: Layout = r.layout;
+  // 나눠 보기용: 각 샷의 수구 경로(진하게) + 적구 경로(옅게)
+  const fullPaths = (sr: ReturnType<typeof sim>, color: string, dash?: number[]) => [
+    ...(['white', 'yellow', 'red'] as BallId[]).filter((b) => b !== r.cue).map((b) => ({ pts: sr.paths[b], color: COLORS[b] + '99', dash: [4, 4], width: 1.2 })),
+    { pts: sr.paths[r.cue as BallId], color, dash, width: 2.5 },
+  ];
+  let recSim: ReturnType<typeof sim> | null = null, userSim: ReturnType<typeof sim> | null = null;
   if (r.kind === 'rest_mismatch') {
     // 예상 멈춤 위치(반투명) vs 사용자가 맞춘 실제 위치
     drawLayout = r.data.actual;
@@ -152,11 +215,13 @@ async function loadDetail(id: number) {
     const showRec = recShot && (!userShot || Math.abs(recShot.angleDeg - userShot.angleDeg) > 0.05 || recShot.speed !== userShot.speed || recShot.tipX !== userShot.tipX);
     if (showRec) {
       const sr = sim(r, recShot!);
+      recSim = sr;
       paths.push({ pts: sr.paths[r.cue as BallId], color: '#3fa7ff', dash: [6, 4] });
       lines.push(`<span class="lg lg-rec"></span>추천 샷: ${shotText(recShot)} → <b>${sr.outcome.scored ? '득점' : '실패'}</b> 예상`);
     }
     if (userShot) {
       const su = sim(r, userShot);
+      userSim = su;
       paths.push({ pts: su.paths[r.cue as BallId], color: '#ff8a3d', width: 2.5 });
       lines.push(`<span class="lg lg-user"></span>${r.kind === 'record' || r.kind === 'miss_reason' ? '친 샷' : '사용자 샷'}: ${shotText(userShot)} → <b>${su.outcome.scored ? '득점' : '실패'}</b> 예상 <span class="note">(${esc(su.outcome.reason)})</span>`);
     }
@@ -170,7 +235,10 @@ async function loadDetail(id: number) {
       <h2>#${r.id} <span class="kind k-${r.kind}">${KIND_KO[r.kind] ?? r.kind}</span> <span class="st st-${r.review_status}">${STATUS_KO[r.review_status]}</span></h2>
       <span class="note">${new Date(r.created_at).toLocaleString('ko-KR')}</span>
     </div>
-    <div class="d-table"><canvas id="dCanvas"></canvas></div>
+    ${recSim && userSim ? `<div class="d-view"><div class="seg" id="viewSel">
+        <button data-v="split">나눠 보기</button><button data-v="rec">추천 경로</button><button data-v="user">유저 경로</button><button data-v="overlay">겹쳐 보기</button>
+      </div></div>` : ''}
+    <div class="d-tables" id="dTables"></div>
     <div class="d-lines">${lines.map((l) => `<div>${l}</div>`).join('')}</div>
     <dl class="d-kv">
       <dt>사유</dt><dd>${r.reason ? esc(REASON_KO[r.reason] ?? r.reason) : '—'}${r.data?.linkedReason ? ` <span class="note">(👎 원래 이유: ${esc(REASON_KO[r.data.linkedReason] ?? r.data.linkedReason)})</span>` : ''}</dd>
@@ -196,7 +264,33 @@ async function loadDetail(id: number) {
       </div>
       <p class="note">저장하면 목록의 다음 기록으로 넘어갑니다${r.reviewed_at ? ` · 마지막 검토 ${new Date(r.reviewed_at).toLocaleString('ko-KR')}` : ''}</p>
     </div>`;
-  drawTable($<HTMLCanvasElement>('dCanvas'), drawLayout, paths, ghosts);
+  // 경로 보기: 추천 vs 유저 (선택은 기억)
+  const userLabel = r.kind === 'record' || r.kind === 'miss_reason' ? '실제로 친 샷' : '유저가 제안한 경로';
+  const renderView = (v: string) => {
+    const box = $('dTables');
+    const fig = (id: string, cap: string) => `<figure><figcaption>${cap}</figcaption><canvas id="${id}"></canvas></figure>`;
+    if (recSim && userSim && v !== 'overlay') {
+      const capR = `<span class="lg lg-rec"></span><b>추천 경로</b> · ${recSim.outcome.scored ? '득점' : '실패'} 예상`;
+      const capU = `<span class="lg lg-user"></span><b>${userLabel}</b> · ${userSim.outcome.scored ? '득점' : '실패'} 예상`;
+      box.className = `d-tables${v === 'split' ? ' split' : ''}`;
+      box.innerHTML = v === 'split' ? fig('cRec', capR) + fig('cUser', capU) : v === 'rec' ? fig('cRec', capR) : fig('cUser', capU);
+      if (v !== 'user') drawTable($<HTMLCanvasElement>('cRec'), drawLayout, fullPaths(recSim, '#3fa7ff', [6, 4]));
+      if (v !== 'rec') drawTable($<HTMLCanvasElement>('cUser'), drawLayout, fullPaths(userSim, '#ff8a3d'));
+    } else {
+      box.className = 'd-tables';
+      box.innerHTML = fig('cAll', recSim && userSim ? '<b>겹쳐 보기</b> · 파랑 점선 = 추천, 주황 = 유저' : '');
+      drawTable($<HTMLCanvasElement>('cAll'), drawLayout, paths, ghosts);
+    }
+    $('detail').querySelectorAll<HTMLButtonElement>('#viewSel button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  };
+  const savedView = (() => { try { return localStorage.getItem('miriq.adminView') || 'split'; } catch { return 'split'; } })();
+  renderView(savedView);
+  $('detail').querySelector('#viewSel')?.addEventListener('click', (ev) => {
+    const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('button');
+    if (!b) return;
+    try { localStorage.setItem('miriq.adminView', b.dataset.v!); } catch { /* 무시 */ }
+    renderView(b.dataset.v!);
+  });
   $('detail').querySelectorAll<HTMLElement>('[data-goto]').forEach((b) => b.addEventListener('click', () => loadDetail(Number(b.dataset.goto))));
   $('detail').querySelectorAll<HTMLButtonElement>('[data-st]').forEach((b) => b.addEventListener('click', async () => {
     b.disabled = true;
