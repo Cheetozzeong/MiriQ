@@ -718,6 +718,7 @@ $('firstSel').addEventListener('click', (ev) => {
 });
 function syncInputs() {
   renderFirstSel();
+  $('thickView').innerHTML = thicknessHtml();
   cueSel.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === shot.cue));
   coordBody.querySelectorAll('input').forEach((inp) => {
     if (document.activeElement === inp) return;
@@ -1523,6 +1524,35 @@ $('logBox').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEv
   setTimeout(() => { $('logMsg').textContent = ''; }, 1500);
 }));
 
+// ───────── 두께 그림: 치는 사람 시점에서 1적구 위에 수구(고스트)를 겹쳐 그림 ─────────
+// 정면(1) = 완전히 겹침, 얇을수록 수구가 옆으로 빠짐 (겹친 폭 = 두께). 빈쿠션이면 1쿠션 지점을 글로
+function thicknessInfo() {
+  if (!result) return null;
+  const first = result.events.find((e) => e.ball === shot.cue || e.other === shot.cue);
+  if (!first) return null;
+  if (first.type === 'cushion') return { bank: true as const, wall: first.wall!, diamond: ((first.wall === 'top' || first.wall === 'bottom') ? first.x : first.y) / DIAMOND };
+  const obj = first.ball === shot.cue ? first.other! : first.ball;
+  const a = (shot.angleDeg * Math.PI) / 180;
+  const c = layout[shot.cue], b = layout[obj];
+  const cross = Math.cos(a) * (b.y - c.y) - Math.sin(a) * (b.x - c.x);
+  const t = Math.max(0, Math.min(1, 1 - Math.abs(cross) / (2 * R)));
+  return { bank: false as const, obj, t, side: cross > 0 ? 'right' as const : 'left' as const };
+}
+function thicknessHtml() {
+  const info = thicknessInfo();
+  if (!info) return '<span class="tk-sub">적구를 맞히지 않는 방향</span>';
+  if (info.bank) return `<span>빈쿠션 · <b>${WALL_KO[info.wall]} ${info.diamond.toFixed(1)}포인트</b></span>`;
+  const r = 15, cx = 42, cy = 22;
+  const off = (1 - info.t) * 2 * r * (info.side === 'right' ? 1 : -1); // 1적구의 오른쪽을 맞히면 수구는 오른쪽으로 비켜 겹침
+  const label = info.t >= 0.94 ? '정면' : `${thicknessText(info.t)} 두께`;
+  const side = info.t >= 0.94 ? '' : info.side === 'right' ? ' · 1적구 오른쪽' : ' · 1적구 왼쪽';
+  return `<svg viewBox="0 0 84 44" aria-hidden="true">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="${COLORS[info.obj]}" stroke="rgba(0,0,0,.4)"/>
+      <circle cx="${cx + off}" cy="${cy}" r="${r}" fill="rgba(247,247,242,.55)" stroke="#fff" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <line x1="${cx + off}" y1="${cy - r - 3}" x2="${cx + off}" y2="${cy + r + 3}" stroke="#3fa7ff" stroke-width="1"/>
+    </svg><span><b>${label}</b><br><span class="tk-sub">${KO[info.obj]}${side}</span></span>`;
+}
+
 // ───────── 샷 안내 카드: 어떻게 쳐야 하는지 자동으로 잠깐 보여주기 ─────────
 function showGuide() {
   // 이의제기·재생 중이거나 조정 시트·결과 카드가 떠 있으면 겹치지 않게 생략
@@ -1534,6 +1564,7 @@ function showGuide() {
   $('gTitle').textContent = c ? `추천 ${i + 1}/${candidates.length} · ${c.pat?.label ?? ''}` : '현재 샷';
   $('gLevel').innerHTML = c?.diff ? `<span class="lv lv-${c.diff.level}">${LEVEL_KO[c.diff.level]}</span>` : '';
   $('gAim').textContent = h.aim || `방향 ${shot.angleDeg.toFixed(1)}°`;
+  $('gThick').innerHTML = thicknessInfo()?.bank === false ? thicknessHtml() : '';
   $('gTipTxt').textContent = h.tip;
   const p = powerLevel(shot.speed);
   $('gPow').textContent = `${p}/5 ${POWER_KO[p]}`;

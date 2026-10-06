@@ -39,6 +39,7 @@
             <svg id="gTip" class="g-tip" viewBox="0 0 64 64" aria-hidden="true"></svg>
             <div class="g-lines">
               <div><span class="g-k">겨냥</span><b id="gAim"></b></div>
+              <div id="gThick" class="thick"></div>
               <div><span class="g-k">당점</span><b id="gTipTxt"></b></div>
               <div><span class="g-k">힘</span><b id="gPow"></b><span class="g-pow" id="gPowBar"></span></div>
             </div>
@@ -140,26 +141,6 @@
           <div class="seg sm" id="firstSel"></div>
           <span class="note" id="firstNote"></span>
         </div>
-        <div class="rec-head">
-          <button id="recBtn" class="primary big">⟳ 추천 받기</button>
-          <select id="prioSel" title="추천 기준">
-            <option value="score">득점 우선</option>
-            <option value="position">후구 배치 우선</option>
-            <option value="defense">수비 우선</option>
-            <option value="balanced">균형</option>
-          </select>
-          <button id="recOptBtn" class="icon-btn" aria-expanded="false" title="추천 설정">⚙</button>
-        </div>
-        <div class="rec-opts" id="recOpts">
-          <div class="opt"><span>탐색</span><div class="seg sm" id="recMode" title="빠름: 힘·당점 6종 · 정밀: 끌어치기 포함 18종"><button data-v="fast" class="on">빠름</button><button data-v="fine">정밀</button></div></div>
-          <div class="opt"><span>실력</span><div class="seg sm" id="skillSel"><button data-v="beginner">입문</button><button data-v="intermediate">중급</button><button data-v="advanced">상급</button></div></div>
-          <div class="opt"><span>테이블</span><div class="seg sm" id="tableSel"><button data-v="slow">느림</button><button data-v="normal">보통</button><button data-v="fast">빠름</button></div></div>
-          <label class="chk"><input type="checkbox" id="easyFirst" checked /> 쉬운 샷 우선</label>
-          <label class="chk"><input type="checkbox" id="autoRec" checked /> 배치 바뀌면 자동 추천</label>
-        </div>
-        <button id="disputeBtn" class="dispute-entry dispute-top hidden">👎 추천이 마음에 안 들어요 — <b>내 샷 제안하기</b></button>
-        <div id="recStatus" class="rec-status"></div>
-        <div id="progress" class="progress hidden"><div></div></div>
         <ol id="cands" class="cards"></ol>
         <div id="logBox" class="log-box hidden">
           <span>이 샷 쳐봤나요?</span>
@@ -168,6 +149,29 @@
         </div>
         <p id="statsNote" class="note"></p>
         <p id="queueNote" class="note hidden"></p>
+        <!-- 고정 하단 바: 상태·진행 / (설정) / 추천 받기·기준·설정·내 샷 제안 -->
+        <div class="rec-foot">
+          <div id="recStatus" class="rec-status"></div>
+          <div id="progress" class="progress hidden"><div></div></div>
+          <div class="rec-opts" id="recOpts">
+            <div class="opt"><span>탐색</span><div class="seg sm" id="recMode" title="빠름: 힘·당점 6종 · 정밀: 끌어치기 포함 18종"><button data-v="fast" class="on">빠름</button><button data-v="fine">정밀</button></div></div>
+            <div class="opt"><span>실력</span><div class="seg sm" id="skillSel"><button data-v="beginner">입문</button><button data-v="intermediate">중급</button><button data-v="advanced">상급</button></div></div>
+            <div class="opt"><span>테이블</span><div class="seg sm" id="tableSel"><button data-v="slow">느림</button><button data-v="normal">보통</button><button data-v="fast">빠름</button></div></div>
+            <label class="chk"><input type="checkbox" id="easyFirst" checked /> 쉬운 샷 우선</label>
+            <label class="chk"><input type="checkbox" id="autoRec" checked /> 배치 바뀌면 자동 추천</label>
+          </div>
+          <div class="rec-head">
+            <button id="recBtn" class="primary big" title="이 배치로 다시 추천 받기">⟳ 추천</button>
+            <select id="prioSel" title="추천 기준">
+              <option value="score">득점 우선</option>
+              <option value="position">후구 배치 우선</option>
+              <option value="defense">수비 우선</option>
+              <option value="balanced">균형</option>
+            </select>
+            <button id="recOptBtn" class="icon-btn" aria-expanded="false" title="추천 설정">⚙</button>
+            <button id="disputeBtn" class="dispute-mini hidden" title="추천이 마음에 안 들 때 내 샷 제안하기">👎 내 샷</button>
+          </div>
+        </div>
       </details>
 
       <details open>
@@ -231,6 +235,7 @@
           <button class="mini" data-da="0.1">+.1</button>
           <button class="mini" data-da="1">+1°</button>
         </div>
+        <div class="row thick-row"><span class="lbl">두께</span><div id="thickView" class="thick"></div></div>
         <div class="row">
           <span class="lbl">힘</span>
           <input type="range" id="speed" min="0.5" max="6" step="0.05" />
