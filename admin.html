@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
+  <meta name="theme-color" content="#12161c" />
+  <title>미리Q 관리자</title>
+</head>
+<body class="admin">
+  <header class="a-top">
+    <h1>미리Q 피드백 검토</h1>
+    <div class="a-top-r">
+      <button id="exportBtn" title="AI 반영으로 표시한 기록을 JSON 으로 내려받기">⬇ 반영 데이터 내보내기</button>
+      <button id="logoutBtn" class="ghost">로그아웃</button>
+    </div>
+  </header>
+
+  <!-- 로그인 -->
+  <section id="login" class="a-login hidden">
+    <h2>관리자 로그인</h2>
+    <p class="note">Vercel 환경 변수 <code>FEEDBACK_ADMIN_TOKEN</code> 에 등록한 관리자 비밀번호를 입력하세요. 이 기기에만 저장됩니다.</p>
+    <form id="loginForm">
+      <input type="password" id="tokenIn" autocomplete="current-password" placeholder="관리자 비밀번호" required />
+      <button class="primary" type="submit">들어가기</button>
+    </form>
+    <p id="loginMsg" class="note"></p>
+  </section>
+
+  <main id="app" class="a-main hidden">
+    <aside class="a-list">
+      <div class="a-filters">
+        <div class="seg sm" id="statusSel">
+          <button data-v="pending" class="on">미검토</button><button data-v="approved">반영</button><button data-v="hold">보류</button><button data-v="rejected">제외</button><button data-v="">전체</button>
+        </div>
+        <select id="kindSel">
+          <option value="">모든 종류</option>
+          <option value="dispute">내 샷 제안</option>
+          <option value="card_dislike">추천 👎</option>
+          <option value="override">추천 대신 내 샷</option>
+          <option value="miss_reason">실패 이유</option>
+          <option value="rest_mismatch">멈춤 위치 차이</option>
+          <option value="record">결과 기록</option>
+        </select>
+      </div>
+      <p id="listInfo" class="note"></p>
+      <ol id="rows" class="a-rows"></ol>
+      <div class="a-pager"><button id="prevPage">◀ 이전</button><span id="pageInfo"></span><button id="nextPage">다음 ▶</button></div>
+    </aside>
+
+    <section id="detail" class="a-detail">
+      <p class="note a-empty">왼쪽 목록에서 기록을 고르세요</p>
+    </section>
+  </main>
+
+  <script type="module" src="/src/admin.ts"></script>
+</body>
+</html>

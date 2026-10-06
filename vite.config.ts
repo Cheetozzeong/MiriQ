@@ -5,4 +5,6 @@ export default defineConfig({
   server: { port: Number(process.env.PORT) || 5173 },
   // 이의제기 데이터에 어떤 버전(물리 계수)으로 계산했는지 남기기 위한 커밋 해시
   define: { __APP_VERSION__: JSON.stringify((process.env.VERCEL_GIT_COMMIT_SHA || 'dev').slice(0, 7)) },
+  // 앱(index.html) + 관리자 페이지(admin.html)
+  build: { rollupOptions: { input: { main: 'index.html', admin: 'admin.html' } } },
 });

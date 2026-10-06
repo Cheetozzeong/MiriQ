@@ -1,6 +1,8 @@
 // 피드백 수집 API — Vercel 서버리스 함수 (저장소: Neon Postgres, DATABASE_URL 자동 주입)
 //  POST /api/feedback : 피드백 1건 저장
-//  GET  /api/feedback : 수집 데이터 내보내기 (Authorization: Bearer $FEEDBACK_ADMIN_TOKEN)
+//  GET  /api/feedback : (관리자) 목록 ?kind=&status=&limit=&offset= · 상세 ?id= · 내보내기 ?export=approved
+//  PATCH /api/feedback : (관리자) 검토 상태 저장 { id, status: pending|approved|rejected|hold, note }
+//  관리자 인증: Authorization: Bearer $FEEDBACK_ADMIN_TOKEN (Vercel 환경 변수)
 //
 // kind (피드백 종류)
 //  record        : 실제로 친 결과 (득점/실패)
@@ -43,6 +45,10 @@ async function ensureTable(sql: NonNullable<ReturnType<typeof db>>) {
     user_agent text
   )`;
   await sql`create index if not exists feedback_kind_created on feedback (kind, created_at desc)`;
+  // 관리자 검토: AI 학습에 반영할지 (pending 미검토 / approved 반영 / hold 보류 / rejected 제외)
+  await sql`alter table feedback add column if not exists review_status text not null default 'pending'`;
+  await sql`alter table feedback add column if not exists review_note text`;
+  await sql`alter table feedback add column if not exists reviewed_at timestamptz`;
   ready = true;
 }
 
@@ -103,15 +109,64 @@ export async function POST(req: Request) {
   return json({ ok: true, id: rows[0].id });
 }
 
-export async function GET(req: Request) {
+const STATUSES = ['pending', 'approved', 'rejected', 'hold'];
+const authed = (req: Request) => {
   const token = process.env.FEEDBACK_ADMIN_TOKEN;
-  if (!token || req.headers.get('authorization') !== `Bearer ${token}`) return json({ ok: false, error: 'unauthorized' }, 401);
+  return !!token && req.headers.get('authorization') === `Bearer ${token}`;
+};
+
+export async function GET(req: Request) {
+  if (!process.env.FEEDBACK_ADMIN_TOKEN) return json({ ok: false, error: 'admin_token_not_configured' }, 503);
+  if (!authed(req)) return json({ ok: false, error: 'unauthorized' }, 401);
   const sql = db();
   if (!sql) return json({ ok: false, error: 'storage_not_configured' }, 503);
   await ensureTable(sql);
-  const kind = new URL(req.url).searchParams.get('kind');
-  const rows = kind
-    ? await sql`select * from feedback where kind = ${kind} order by id desc limit 5000`
-    : await sql`select * from feedback order by id desc limit 5000`;
-  return json({ ok: true, count: rows.length, rows });
+  const q = new URL(req.url).searchParams;
+  // 상세: 기록 1건 + 연결된 기록(👎 → 제안 등, 기기 생성 ID fid 로 연결)
+  const id = q.get('id');
+  if (id) {
+    const rows = await sql`select * from feedback where id = ${Number(id)}`;
+    if (!rows.length) return json({ ok: false, error: 'not_found' }, 404);
+    const r = rows[0] as any;
+    const fid = r.data?.fid ?? null, linkedFid = r.data?.linkedFid ?? null;
+    const linked = await sql`select id, created_at, kind, reason, result, review_status from feedback
+      where (${fid}::text is not null and data->>'linkedFid' = ${fid}) or (${linkedFid}::text is not null and data->>'fid' = ${linkedFid})
+      order by id`;
+    return json({ ok: true, row: r, linked });
+  }
+  // 내보내기: AI 반영으로 표시한 기록 전체
+  if (q.get('export') === 'approved') {
+    const rows = await sql`select * from feedback where review_status = 'approved' order by id`;
+    return json({ ok: true, count: rows.length, rows });
+  }
+  // 목록 (필터 + 페이지)
+  const where: string[] = [], params: unknown[] = [];
+  const kind = q.get('kind'), status = q.get('status');
+  if (kind && KINDS.includes(kind)) { params.push(kind); where.push(`kind = $${params.length}`); }
+  if (status && STATUSES.includes(status)) { params.push(status); where.push(`review_status = $${params.length}`); }
+  const w = where.length ? `where ${where.join(' and ')}` : '';
+  const limit = Math.min(100, Math.max(1, Number(q.get('limit')) || 30));
+  const offset = Math.max(0, Number(q.get('offset')) || 0);
+  const rows = await sql.query(
+    `select id, created_at, kind, reason, result, rank, client_id, app_version, user_agent, comment, review_status, review_note,
+       data->>'source' as source
+     from feedback ${w} order by id desc limit ${limit} offset ${offset}`, params);
+  const total = await sql.query(`select count(*)::int as n from feedback ${w}`, params);
+  const counts = await sql`select kind, review_status, count(*)::int as n from feedback group by kind, review_status`;
+  return json({ ok: true, rows, total: (total as any)[0].n, counts });
+}
+
+export async function PATCH(req: Request) {
+  if (!process.env.FEEDBACK_ADMIN_TOKEN) return json({ ok: false, error: 'admin_token_not_configured' }, 503);
+  if (!authed(req)) return json({ ok: false, error: 'unauthorized' }, 401);
+  const sql = db();
+  if (!sql) return json({ ok: false, error: 'storage_not_configured' }, 503);
+  let b: any;
+  try { b = JSON.parse(await req.text()); } catch { return json({ ok: false, error: 'invalid_json' }, 400); }
+  if (!num(b?.id, 1, 1e12) || !STATUSES.includes(b.status) || !str(b.note, 1000)) return json({ ok: false, error: 'invalid' }, 400);
+  await ensureTable(sql);
+  const rows = await sql`update feedback set review_status = ${b.status}, review_note = ${b.note || null}, reviewed_at = now()
+    where id = ${b.id} returning id, review_status, review_note, reviewed_at`;
+  if (!rows.length) return json({ ok: false, error: 'not_found' }, 404);
+  return json({ ok: true, row: rows[0] });
 }
