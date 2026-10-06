@@ -515,3 +515,23 @@ body.rotated .rail [data-only='rotated'] { display: flex; }
 
 /* 치러 가는 동안: "이걸로 칠게요" 버튼 숨김 (결과 기록 표시만) */
 body.shooting .hud-go { display: none; }
+
+/* ───────── 피드백 (이의제기 흐름) ───────── */
+.chips.sm { gap: 5px; }
+.chips.sm button { font-size: 12.5px; padding: 4px 9px; min-height: 30px; }
+.chips button.ghost { background: transparent; color: var(--muted); }
+.chips button.sel { background: var(--warn); border-color: var(--warn); color: #1b1606; font-weight: 700; }
+.as-why { margin: 2px 0 8px; display: flex; flex-direction: column; gap: 6px; }
+.as-why-q { font-size: 13px; font-weight: 600; }
+.as-why .done { font-size: 13px; color: var(--ok); }
+.as-why .link { color: var(--accent); background: none; border: 0; padding: 0; min-height: 0; text-decoration: underline; font-size: 13px; }
+.g-over { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12.5px; display: flex; flex-direction: column; gap: 6px; }
+.nudge { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; gap: 8px;
+  background: rgba(16,21,28,.94); border: 1px solid var(--warn); border-radius: 12px; padding: 6px 8px 6px 12px; font-size: 13px; white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(0,0,0,.4); max-width: calc(100% - 20px); }
+.nudge button { min-height: 32px; padding: 2px 10px; font-size: 13px; }
+.nudge #nudgeClose { width: 30px; padding: 0; }
+.dislike { margin-left: 4px; min-height: 0; height: 26px; width: 30px; padding: 0; font-size: 13px; background: transparent; border-color: transparent; opacity: .6; flex: none; }
+.dislike:hover, .dislike.on { opacity: 1; border-color: var(--line); }
+.dl-row { margin-top: 6px; padding: 6px 8px; background: rgba(0,0,0,.25); border-radius: 8px; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
+.dl-done { margin-top: 4px; font-size: 12px; color: var(--muted); }

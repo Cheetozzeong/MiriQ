@@ -45,6 +45,12 @@
           </div>
           <div class="g-route" id="gRoute"></div>
           <div class="g-pos" id="gPos"></div>
+          <div class="g-over hidden" id="gOverride">
+            <span>추천 대신 내 샷으로 치시네요 — 이유는?</span>
+            <div class="chips sm">
+              <button data-ov="hard">치기 어려워서</button><button data-ov="better">다른 길이 나아서</button><button data-ov="physics">예측이 이상해서</button>
+            </div>
+          </div>
           <div class="g-btns"><button id="gBack" class="g-back">다른 샷 보기</button><button id="gOk" class="primary g-ok">치러 가기</button></div>
         </div>
         <!-- 큰 화면 조정 시트: 도구 막대의 "조정"을 누르면 펼침 -->
@@ -68,10 +74,22 @@
             <button data-a="adjust" class="as-ok2">✓ 득점 · 배치가 달라요<br><small>공 위치 맞추기</small></button>
             <button data-a="miss" class="as-miss">✗ 실패했어요</button>
           </div>
+          <div class="as-why hidden" id="asWhy">
+            <span class="as-why-q">왜 빗나갔을까요?</span>
+            <div class="chips sm">
+              <button data-why="physics">예측과 다르게 갔어요</button><button data-why="hard">너무 어려웠어요</button>
+              <button data-why="better">다른 길이 나았어요</button><button data-why="skip" class="ghost">건너뛰기</button>
+            </div>
+          </div>
           <div class="as-btns hidden" id="asMissOpts">
             <button data-a="opp">상대 차례로 넘기기<br><small>수구 바꾸고 배치 맞추기</small></button>
             <button data-a="retry">같은 배치로 다시</button>
           </div>
+        </div>
+        <div id="nudge" class="nudge hidden" role="status">
+          <span>마음에 드는 추천이 없나요?</span>
+          <button id="nudgeGo" class="primary">내 샷 제안하기</button>
+          <button id="nudgeClose" aria-label="닫기">✕</button>
         </div>
         <!-- 추천 탐색 중 표시 (모든 화면) -->
         <div id="tableLoading" class="table-loading hidden" role="status" aria-live="polite">
@@ -148,7 +166,7 @@
           <span id="logMsg" class="note"></span>
         </div>
         <p id="statsNote" class="note"></p>
-        <button id="disputeBtn" class="dispute-entry hidden">추천이 아쉬운가요? <b>이의제기</b> — 내 샷 제안하기</button>
+        <button id="disputeBtn" class="dispute-entry hidden">추천이 아쉬울 때 — <b>내 샷 제안하기</b></button>
         <p id="queueNote" class="note hidden"></p>
       </details>
 

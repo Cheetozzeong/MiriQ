@@ -918,6 +918,7 @@ async function recommend() {
 
 let recTimer = 0;
 function layoutChanged() {
+  resetFeedbackState();
   updateOpening(); // 초구 여부(→ 1적구 자동 지정/해제)를 배치 기준으로 바로 반영
   hideAfterShot();
   hideGuide();
@@ -940,6 +941,9 @@ let lastApplied = -1; // 마지막으로 적용한 추천 (이의제기 대상 �
 function applyCandidate(i: number, guide = false) {
   const c = candidates[i];
   lastApplied = i;
+  visited.add(i);
+  appliedShot = { rank: i, shot: { angleDeg: c.angleDeg, speed: c.speed, tipX: c.tipX, tipY: c.tipY } };
+  if (candidates.length >= 3 && visited.size >= candidates.length && !shotChosen) maybeNudge();
   Object.assign(shot, { angleDeg: c.angleDeg, speed: c.speed, tipX: c.tipX, tipY: c.tipY });
   sysRes = null;
   recompute();
@@ -993,17 +997,35 @@ function renderCands() {
     return `<li class="card${i === cur ? ' on' : ''}" data-i="${i}">
       <div class="card-top"><span class="rank">${i + 1}</span>
         <span class="lv lv-${lv}">${LEVEL_KO[lv]}</span><span class="pat">${c.pat?.label ?? ''}</span>
-        <b class="pct" style="color:${color}">${pct}%</b></div>
+        <b class="pct" style="color:${color}">${pct}%</b>
+        <button class="dislike${dislikeOpen === i || disliked.has(candKey(c)) ? ' on' : ''}" data-dislike="1" title="이 추천 별로예요">👎</button></div>
       <div class="how"><b>${h.aim}</b> · ${tipIcon(c.tipX, c.tipY)} ${h.tip} · ${h.power}</div>
       <div class="route">${route}${s?.kiss ? ' <span class="kiss">키스 주의</span>' : ''}</div>
       ${metricsHtml(c)}
       ${c.diff && c.diff.reasons.length ? `<div class="note">까다로운 점: ${c.diff.reasons.slice(0, 3).join(', ')}</div>` : ''}
+      ${disliked.has(candKey(c)) ? `<div class="dl-done">👎 의견 고마워요 (${DL_KO[disliked.get(candKey(c))!]})</div>` : ''}
+      ${dislikeOpen === i ? `<div class="dl-row"><span>이 추천은 왜 별로인가요?</span><div class="chips sm">
+        <button data-dl="hard">치기 어려움</button><button data-dl="wrong_path">이 길 아님</button><button data-dl="physics">예측이 이상함</button>
+        <button data-propose="1" class="ghost">내 샷 제안하기 →</button></div></div>` : ''}
       ${i === cur ? '<div class="tag">적용됨 · 한 번 더 탭하면 재생</div><button class="primary card-go" data-go="1">🎯 이걸로 칠게요</button>' : ''}
     </li>`;
   }).join('');
   ol.querySelectorAll<HTMLElement>('.card').forEach((li) => li.addEventListener('click', (ev) => {
-    if ((ev.target as HTMLElement).closest('[data-go]')) { goShoot(); return; }
+    const t = ev.target as HTMLElement;
+    if (t.closest('[data-go]')) { goShoot(); return; }
     const i = +li.dataset.i!;
+    // ④ 카드 👎 → 그 자리에서 이유 칩 → 한 번 탭으로 저장
+    if (t.closest('[data-dislike]')) { dislikeOpen = dislikeOpen === i ? -1 : i; renderCands(); return; }
+    const dl = t.closest<HTMLElement>('[data-dl]');
+    if (dl) {
+      const c = candidates[i];
+      disliked.set(candKey(c), dl.dataset.dl!);
+      dislikeOpen = -1;
+      sendFeedback('card_dislike', { rank: i, reason: dl.dataset.dl, shot: shotOf({ ...shot, ...c }), data: { candidate: candInfo(c) } });
+      renderCands();
+      return;
+    }
+    if (t.closest('[data-propose]')) { dislikeOpen = -1; applyCandidate(i); startDispute(); return; }
     if (candidates[i]?.pending) return;
     if (i === currentCand()) { closeDrawer(); startAnim(); return; } // 이미 적용된 카드를 다시 탭하면 재생
     applyCandidate(i);
@@ -1012,7 +1034,11 @@ function renderCands() {
   renderHud();
   renderStats();
 }
-$('recBtn').addEventListener('click', () => { clearTimeout(recTimer); recommend(); });
+$('recBtn').addEventListener('click', () => {
+  clearTimeout(recTimer);
+  if (++manualRecs >= 2) maybeNudge(); // 같은 배치에서 추천을 다시 받는다 = 마음에 드는 게 없다는 신호
+  recommend();
+});
 $('recMode').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
   recMode = b.dataset.v as keyof typeof MODES;
   $('recMode').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
@@ -1208,14 +1234,16 @@ $('dSubmit').addEventListener('click', async () => {
     physics: PHYS, createdAt: new Date().toISOString(),
   };
   $('dMsg').textContent = '전송 중…';
-  const r = await postFeedback(payload);
+  void payload;
+  const r = await sendFeedback('dispute', {
+    shot: shotOf(shot), rank: dispute.rank, reason: dispute.reason, result: dispute.actual,
+    comment: ($('dComment') as HTMLTextAreaElement).value.trim().slice(0, 500),
+    recommended: dispute.recs.map(candInfo),
+    data: { userSim: { scored: o.scored, firstHit: o.firstHit ?? null, secondHit: o.secondHit ?? null, cushions: o.cueCushions, kiss: o.kiss, prob } },
+  });
   if (r.ok) $('dMsg').innerHTML = `<span style="color:var(--ok)">제출 완료 (#${r.id}) — 고맙습니다!</span>`;
-  else if (r.retry) {
-    const q = store.get<unknown[]>(QUEUE_KEY, []);
-    q.push(payload); store.set(QUEUE_KEY, q);
-    $('dMsg').innerHTML = `<span style="color:var(--warn)">서버 저장소에 연결되지 않아 이 기기에 보관했습니다 (${q.length}건) — 연결되면 자동 전송</span>`;
-  } else { $('dMsg').innerHTML = '<span style="color:var(--fail)">전송 실패 (입력값 오류)</span>'; return; }
-  renderQueueNote();
+  else if (r.queued) $('dMsg').innerHTML = '<span style="color:var(--warn)">서버에 연결되지 않아 이 기기에 보관했습니다 — 연결되면 자동 전송</span>';
+  else { $('dMsg').innerHTML = '<span style="color:var(--fail)">전송 실패 (입력값 오류)</span>'; return; }
   setTimeout(() => endDispute(false), 1400);
 });
 
@@ -1461,6 +1489,7 @@ function addRecord(res: 'scored' | 'missed') {
   recs.push({ ts: new Date().toISOString(), layout: clone(layout), shot: { ...shot }, rank: i, level: c?.diff?.level, prob: c?.prob ?? prob ?? 0, result: res, skill: prefs.skill });
   try { localStorage.setItem(RECORDS_KEY, JSON.stringify(recs.slice(-500))); } catch { /* 저장 불가 */ }
   renderStats();
+  sendFeedback('record', { shot: shotOf(shot), rank: i, result: res, data: { prob: c?.prob ?? prob, level: c?.diff?.level, run: runCount, candidate: c ? candInfo(c) : null } });
 }
 $('logBox').querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.addEventListener('click', () => {
   if (currentCand() < 0) return;
@@ -1507,7 +1536,13 @@ function goShoot() {
   hideAdj(); hideAfterShot();
   if (isPortrait()) setSheet('min');
   else closeDrawer();
+  shotChosen = true;
+  $('nudge').classList.add('hidden');
   showGuide();
+  // ③ 추천을 적용한 뒤 방향·당점·힘을 직접 크게 바꿨다면 = 암묵적 이의제기
+  overrideReason = null;
+  $('gOverride').querySelectorAll('button').forEach((b) => b.classList.remove('sel'));
+  $('gOverride').classList.toggle('hidden', !isOverride() || asked.has('override'));
 }
 $('hudGo').addEventListener('click', goShoot);
 $('gBack').addEventListener('click', hideGuide);
@@ -1518,7 +1553,101 @@ function setShooting(on: boolean) {
   $('hud').classList.toggle('folded', on || hudFolded);
   $('pendingRec').classList.toggle('hidden', !on);
 }
-$('gOk').addEventListener('click', () => { hideGuide(); setShooting(true); });
+$('gOk').addEventListener('click', () => {
+  // 추천과 다른 샷으로 치러 가면 이유를 골랐든 안 골랐든 함께 저장
+  if (isOverride() && appliedShot) {
+    sendFeedback('override', { shot: shotOf(shot), rank: appliedShot.rank, reason: overrideReason, data: { recShot: appliedShot.shot } });
+    asked.add('override');
+  }
+  hideGuide(); setShooting(true);
+});
+$('gOverride').addEventListener('click', (ev) => {
+  const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('[data-ov]');
+  if (!b) return;
+  overrideReason = b.dataset.ov!;
+  $('gOverride').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x === b));
+});
+
+// ───────── 피드백 수집 (Neon) ─────────
+// 원칙: 한 번 탭으로 끝 · 같은 배치에서 같은 질문은 한 번만 · 행동으로 알 수 있는 건 묻지 않고 조용히 저장
+const asked = new Set<string>();
+let visited = new Set<number>();
+let manualRecs = 0;
+let shotChosen = false;
+let appliedShot: { rank: number; shot: Pick<Shot, 'angleDeg' | 'speed' | 'tipX' | 'tipY'> } | null = null;
+let overrideReason: string | null = null;
+let dislikeOpen = -1;
+const disliked = new Map<string, string>();
+const DL_KO: Record<string, string> = { hard: '치기 어려움', wrong_path: '이 길 아님', physics: '예측이 이상함' };
+const candKey = (c: Candidate) => `${c.angleDeg.toFixed(2)}|${c.speed}|${c.tipX}|${c.tipY}`;
+const shotOf = (s: Pick<Shot, 'angleDeg' | 'speed' | 'tipX' | 'tipY'>) => ({ angleDeg: norm(s.angleDeg), speed: s.speed, tipX: s.tipX, tipY: s.tipY });
+const candInfo = (c: Candidate) => ({
+  ...shotOf(c), prob: c.prob, position: c.position ?? null, defense: c.defense ?? null, width: c.width,
+  level: c.diff?.level ?? null, difficulty: c.diff?.score ?? null, pattern: c.pat?.label ?? null, cushionFirst: !!c.summary?.cushionFirst,
+});
+// 추천을 적용한 뒤 방향 0.5° 이상 · 힘 0.3 이상 · 당점 0.1R 이상 바꿨으면 "내 샷"
+function isOverride() {
+  if (!appliedShot || currentCand() >= 0) return false;
+  const a = appliedShot.shot;
+  const dAng = Math.abs(((shot.angleDeg - a.angleDeg + 540) % 360) - 180);
+  return dAng > 0.5 || Math.abs(shot.speed - a.speed) > 0.3 || Math.hypot(shot.tipX - a.tipX, shot.tipY - a.tipY) > 0.1;
+}
+function resetFeedbackState() {
+  asked.clear(); visited = new Set(); manualRecs = 0; shotChosen = false; appliedShot = null; dislikeOpen = -1; disliked.clear();
+  $('nudge').classList.add('hidden');
+  if (pendingRest) { clearTimeout(restTimer); restTimer = window.setTimeout(sendRest, 4000); }
+}
+async function sendFeedback(kind: string, extra: Record<string, unknown>): Promise<{ ok: true; id: number } | { ok: false; queued: boolean }> {
+  const payload = {
+    v: 2, kind, clientId: clientId(), appVersion: __APP_VERSION__, layout: clone(layout), cue: shot.cue,
+    recommended: candidates.filter((c) => !c.pending).map(candInfo),
+    settings: { skill: prefs.skill, table: prefs.table, priority: prefs.priority, easyFirst: prefs.easyFirst, recMode, firstBall: shot.firstBall ?? null, opening: !!shot.opening },
+    physics: PHYS, createdAt: new Date().toISOString(), ...extra,
+  };
+  const r = await postFeedback(payload);
+  if (r.ok) return r;
+  if (r.retry) { const q = store.get<unknown[]>(QUEUE_KEY, []); q.push(payload); store.set(QUEUE_KEY, q.slice(-300)); renderQueueNote(); }
+  return { ok: false, queued: r.retry };
+}
+
+// ① 실패 이유
+function renderWhy() {
+  $('asWhy').innerHTML = `<span class="as-why-q">왜 빗나갔을까요?</span><div class="chips sm">
+    <button data-why="physics">예측과 다르게 갔어요</button><button data-why="hard">너무 어려웠어요</button>
+    <button data-why="better">다른 길이 나았어요</button><button data-why="skip" class="ghost">건너뛰기</button></div>`;
+}
+$('asWhy').addEventListener('click', (ev) => {
+  const t = ev.target as HTMLElement;
+  if (t.closest('[data-propose]')) { hideAfterShot(); startDispute(); return; }
+  const b = t.closest<HTMLElement>('[data-why]');
+  if (!b) return;
+  asked.add('miss');
+  if (b.dataset.why === 'skip') { $('asWhy').classList.add('hidden'); return; }
+  sendFeedback('miss_reason', { shot: shotOf(shot), rank: currentCand(), reason: b.dataset.why });
+  $('asWhy').innerHTML = `<span class="done">고마워요 🙏 예측을 고치는 데 쓸게요</span>${b.dataset.why === 'better' ? '<button class="link" data-propose="1">어떤 길이 나았는지 내 샷 제안하기 →</button>' : ''}`;
+});
+
+// ② 예상 멈춤 위치 vs 실제 (사용자가 공을 맞춘 뒤 4초 동안 더 안 움직이면 저장)
+let pendingRest: { before: Layout; shot: ReturnType<typeof shotOf>; predicted: Layout } | null = null;
+let restTimer = 0;
+function sendRest() {
+  if (!pendingRest) return;
+  const moved = BALL_IDS.some((id) => Math.hypot(layout[id].x - pendingRest!.predicted[id].x, layout[id].y - pendingRest!.predicted[id].y) > 0.01);
+  if (!moved) return; // 아직 안 맞춤 → 다음 변경 때 다시
+  const p = pendingRest;
+  pendingRest = null;
+  const err = Object.fromEntries(BALL_IDS.map((id) => [id, Math.hypot(layout[id].x - p.predicted[id].x, layout[id].y - p.predicted[id].y)]));
+  sendFeedback('rest_mismatch', { shot: p.shot, result: 'scored', data: { before: p.before, predicted: p.predicted, actual: clone(layout), errorM: err } });
+}
+
+// ⑤ 마음에 드는 추천이 없을 때 (추천을 끝까지 넘겨 봤거나, 같은 배치에서 추천을 2번 이상 다시 받음)
+function maybeNudge() {
+  if (asked.has('nudge') || shotChosen || dispute || (!candidates.length && !pool.length)) return;
+  asked.add('nudge');
+  $('nudge').classList.remove('hidden');
+}
+$('nudgeGo').addEventListener('click', () => { $('nudge').classList.add('hidden'); startDispute(); });
+$('nudgeClose').addEventListener('click', () => $('nudge').classList.add('hidden'));
 $('pendingRec').addEventListener('click', () => { setShooting(false); showAfterShot(); });
 
 // ───────── 큰 화면 조정 시트: 방향(±·문지르기)·힘 ─────────
@@ -1578,7 +1707,10 @@ $('afterShot').addEventListener('click', (ev) => {
     addRecord('scored');
     runCount++;
     hideAfterShot();
+    const before = clone(layout), played = shotOf(shot), predicted = clone(result.final);
     loadNextLayout(shot.cue);
+    // "배치가 달라요": 사용자가 공을 실제 위치로 맞추면 예측과의 차이를 조용히 저장 (질문 없음)
+    if (a === 'adjust') pendingRest = { before, shot: played, predicted };
     if (a === 'adjust') { selectTab(1); toast('예상 배치를 불러왔어요. 실제 위치와 다른 공을 끌어서 맞춰 주세요'); }
     else toast(`뒷공 배치로 이어갑니다 (연속 ${runCount}점) — 실제와 다르면 공을 끌어서 맞춰 주세요`);
   } else if (a === 'miss') {
@@ -1589,6 +1721,7 @@ $('afterShot').addEventListener('click', (ev) => {
     $('asRun').textContent = '';
     $('asMain').classList.add('hidden');
     $('asMissOpts').classList.remove('hidden');
+    if (!asked.has('miss')) { renderWhy(); $('asWhy').classList.remove('hidden'); }
   } else if (a === 'opp') {
     // 상대 차례: 상대 수구로 바꾸고, 실제 멈춘 위치로 공을 맞추도록 배치 탭 열기
     hideAfterShot();
