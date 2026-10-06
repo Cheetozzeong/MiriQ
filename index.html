@@ -160,8 +160,7 @@
             <label class="chk"><input type="checkbox" id="easyFirst" checked /> 쉬운 샷 우선</label>
             <label class="chk"><input type="checkbox" id="autoRec" checked /> 배치 바뀌면 자동 추천</label>
           </div>
-          <div class="rec-head">
-            <button id="recBtn" class="primary big" title="이 배치로 다시 추천 받기">⟳ 추천</button>
+          <div class="rf-sub">
             <select id="prioSel" title="추천 기준">
               <option value="score">득점 우선</option>
               <option value="position">후구 배치 우선</option>
@@ -169,8 +168,9 @@
               <option value="balanced">균형</option>
             </select>
             <button id="recOptBtn" class="icon-btn" aria-expanded="false" title="추천 설정">⚙</button>
-            <button id="disputeBtn" class="dispute-mini hidden" title="추천이 마음에 안 들 때 내 샷 제안하기">👎 내 샷</button>
+            <button id="disputeBtn" class="dispute-mini hidden" title="추천이 마음에 안 들 때 내 샷 제안하기">👎 이의제기하기</button>
           </div>
+          <button id="recBtn" class="primary rf-main" title="이 배치로 다시 추천 받기">⟳ 추천 받기</button>
         </div>
       </details>
 

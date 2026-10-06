@@ -295,6 +295,10 @@ function draw() {
 
   const showOthers = ($('others') as HTMLInputElement).checked;
   if (anim) drawAnim(showOthers);
+  else if (searchingNow && !dispute) { // 탐색 중: 공 배치만 (드래그 중이면 돋보기도)
+    for (const id of BALL_IDS) ball(layout[id], id, 1, id === shot.cue);
+    if (loupe) drawLoupe(loupe.x, loupe.y, loupe.id);
+  }
   else drawPrediction(showOthers);
 }
 
@@ -802,8 +806,10 @@ function setProgress(p: number | null, text = '') {
   setTableLoading(p === null ? null : `추천 경로 찾는 중… ${Math.round(p * 100)}%`, p);
 }
 // 테이블 위 로딩 표시: 시트를 접어 둬도 탐색 중임을 알 수 있게
+let searchingNow = false; // 추천 탐색 중에는 테이블에 큐·예상 경로를 그리지 않고 공만
 function setTableLoading(text: string | null, p: number | null = null) {
   $('tableLoading').classList.toggle('hidden', text === null);
+  if (searchingNow !== (text !== null)) { searchingNow = text !== null; document.body.classList.toggle('searching', searchingNow); draw(); }
   if (text === null) return;
   $('tlText').textContent = text;
   $('tlBar').style.width = `${(p ?? 0) * 100}%`;
